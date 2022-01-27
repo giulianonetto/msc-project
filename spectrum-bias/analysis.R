@@ -141,6 +141,6 @@ basically, we want to show two problems:
 (2) problem with validating with case-control data
 
 (1) may look at bad performance: disc, cal, nb
-(2) may look at bias in performance estimates: disc, cal, nb
+(2) may look at bias in performance estimates: disc, cal, nb (external at first, but also bias in CV estimates)
 "
 
