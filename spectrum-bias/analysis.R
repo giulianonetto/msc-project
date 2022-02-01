@@ -52,13 +52,7 @@ rm(X, p, y)
 theme_set(theme_bw())
 set.seed(SEED)
 ix <- sample(1:n_pop, 1e4)  # subset 1000 random samples for plotting
-p <- df_pop[ix, ] %>% 
-  ggplot(aes(x = p, fill = factor(y))) +
-  geom_histogram() +
-  labs(
-    x = "Disease probability",
-    fill = "Disease label"
-  )
+p <- plot_disease_prob(df_pop[ix,])
 ggsave("output/population_disease_probability.png",
        p, width = 8, height = 4.5)
 ## Simulate case-control experiment ----
@@ -69,14 +63,7 @@ diff_groups(df_pop)
 diff_groups(df_sample)
 ### Plot disease probabilities from case-control sample ----
 
-p <- df_sample %>% 
-  ggplot(aes(x = p, fill = factor(y))) +
-  geom_histogram() +
-  labs(
-    x = "Disease probability",
-    fill = "Disease label",
-    title = "Case-control sample"
-  )
+p <- plot_disease_prob(df_sample,  "Case-control sample")
 ggsave("output/case-control-sample_disease_probability.png",
        p, width = 8, height = 4.5)
 

@@ -1,0 +1,16 @@
+---
+output: 
+  html_document:
+    keep_md: yes
+editor_options:
+  chunk_output_type: console
+---
+
+```{r echo=FALSE}
+knitr::opts_chunk$set(
+  fig.width = 10,
+  fig.height = 4,
+  dpi = 300
+)
+```
+
