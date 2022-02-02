@@ -1,4 +1,19 @@
 # Define auxiliary functions ---------------------------------------------------
+get_X <- function(n, v = 5, corr = c(-0.2, 0, 0), mu = c(0, 0, 0), .seed = 123) {
+  S <- diag(v, length(corr), length(corr))
+  S[upper.tri(S)] <- corr * sqrt(v)^2  # set correlations
+  S[lower.tri(S)] <- t(S)[lower.tri(S)]
+  set.seed(.seed)
+  x <- MASS::mvrnorm(
+    n_pop,
+    mu = mu,
+    Sigma = S
+  )
+  X <- as.matrix(cbind(1, x))
+  
+  return(X)
+}
+
 odds <- function(p) p/(1-p)
 inv_odds <- function(o) o/(1 + o)
 logit <- function(p) log(odds(p))
