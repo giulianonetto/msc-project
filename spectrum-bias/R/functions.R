@@ -145,3 +145,38 @@ plot_disease_prob <- function(df, title = NULL) {
 format2 <- function(x, .digits = 3) {
   round(unname(x), .digits)
 }
+
+get_decision_consequences <- function(data, phat, .thresholds,
+                                      p = "p", y = "y") {
+  stopifnot(all(
+    c(phat, p, y) %in% colnames(data)
+  ))
+  names(thresholds) <- thresholds
+  
+  map(thresholds, function(.threshold) {
+    data_below <- data[data[[phat]] < .threshold, ]
+    data_above <- data[data[[phat]] > .threshold, ]
+    data.frame(
+      npv = mean(data_below[[y]] == 0),
+      undertreat = mean(
+        data_below[[p]] > .threshold
+      ),
+      undertreat_sick = mean(
+        data_below[[p]] > .threshold & data_below[[y]] == 1
+      ),
+      ppv = mean(data_above[[y]] == 1),
+      overtreat = mean(
+        data_above[[p]] < .threshold
+      ),
+      overtreat_healthy = mean(
+        data_above[[p]] < .threshold & data_above[[y]] == 0
+      )
+    )
+  }) %>% 
+    bind_rows(.id = "threshold") %>% 
+    mutate(
+      threshold = as.numeric(threshold),
+      estimator = phat
+    )
+  
+}

@@ -24,7 +24,6 @@ knitr::opts_chunk$set(
 library(tidyverse)
 library(ggpubr)
 library(patchwork)
-library(runway)
 library(rms)
 library(rmda)
 theme_set(theme_bw())
@@ -147,7 +146,7 @@ We now fit and perform internal validation with the case-control sample. In orde
 p_hat <- mean(df_sample_cs$y)
 df_sample_cc$.offset <- get_prior_modeling_offset(p_hat = p_hat,
                                                   sampling_ratio = 0.5/0.5)
-fit_cc <- lrm(y ~ x1 + x2 + x3 + offset(.offset), data = df_sample_cc, x = TRUE, y = TRUE)
+fit_cc <- lrm(y ~ x1 + x2 + x3, data = df_sample_cc, x = TRUE, y = TRUE)
 auc_cc <- get_auc_from_fit(fit_cc)
 cat("\nEstimated coeffs: ", exp(coef(fit_cc)[-1]),
     "\nEstimated AUC  (internal validation): ", auc_cc)
@@ -208,9 +207,6 @@ title(main = 'CC model')
 
 * Even though the coefficients for the CS model were nearly 100% accurate, it looks like *underfitting*! (predicted probabilities not extreme enough).
 * CC model systematically underestimated disease probabilities.
-
-> Why is the CS model miscalibrated even when validating with CC data?!
-
 * In summary, when validating with case-control data, we may expect overestimation of discrimination but poor calibration (even with arbitrarily good models).
 
 ### Cross-sectional validation data
@@ -267,22 +263,25 @@ dca_data <- data.frame(
   p_cc = p_hat_cc,
   p_cs = p_hat_cs
 )
-thresholds <- seq(0, .5, by = 0.01)
+thresholds <- seq(0, .99, by = 0.01)
 dca_cc <- decision_curve(y ~ p_cc, data = dca_data,
                          thresholds = thresholds,
-                         bootstraps = 1)
+                         bootstraps = 1,
+                         fitted.risk = T)
 dca_cs <- decision_curve(y ~ p_cs, data = dca_data,
                          thresholds = thresholds,
-                         bootstraps = 1)
+                         bootstraps = 1,
+                         fitted.risk = T)
 dca_true <- decision_curve(y ~ true_p, data = dca_data,
-                         thresholds = thresholds,
-                         bootstraps = 1)
+                           thresholds = thresholds,
+                           bootstraps = 1,
+                         fitted.risk = T)
 par(mfrow = c(1, 1))
 plot_decision_curve(
-    list(dca_cs, dca_cc, dca_true),
-    standardize = F,
-    confidence.intervals = F,
-    lty = c(1,1, 2)
+  list(dca_cs, dca_cc, dca_true),
+  standardize = T,
+  confidence.intervals = F,
+  lty = c(1,1, 2)
 )
 ```
 
@@ -300,6 +299,35 @@ plot_decision_curve(
 * Under a NPV of 90%, you may have individuals with much more or much less than 90% probability of disease.
 * If you are worried about undertreatment, it means you want lower thresholds.
 * If your threshold is 10%, you wan to "send home" only people with less than 10% disease probability
+
+### What is the NPV when predictive information is continuous
+
+Say we have a discrete set of predicted probabilities $\hat{p_i}$ and corresponding outcomes $Y_i$ for individuals $i=1,2,\cdots, n$. An individual tests negative when its predicted probability is less than a threshold probability $t$. Them, the negative predictive value, defined as the probability of not having the disease when testing negative, is:
+
+$$
+\begin{align}
+\Pr(Y_i=0 | \textrm{model says "no disease"}) &= \Pr(Y_i=0 | \hat{p_i} < t) &\textrm{(Definition of NPV)}\\
+&= \frac{
+\Pr(Y_i = 0) \Pr(\hat{p_i} < t | Y_i = 0) 
+}{
+\Pr(\hat{p_i} < t)
+} &\textrm{(Bayes Theorem)} \\
+&= \frac{
+\Pr(Y_i = 0) \sum_{j<t}\Pr(\hat{p_i} = j | Y_i = 0) 
+}{
+\sum_{j<t} \Pr(\hat{p_i} = j)
+} &\textrm{(discrete probs.)} \\
+&=(1-\textrm{Prevalence}) \frac{
+\sum_{j<t}\Pr(\hat{p_i} = j | Y_i = 0) 
+}{
+\sum_{j<t} \Pr(\hat{p_i} = j)
+} &\textrm{(Prevalence definition)}
+\end{align}
+$$
+
+So the NPV for a predictive model depends on both the prevalence of the disease and the distribution of the predicted probabilities - marginal and conditional on being healthy. 
+
+> Not sure how to interpret this. But the NPV is hiding a series of individual probabilities.
 
 ### Undertreatment with CC model
 
@@ -386,46 +414,424 @@ cat(
 
 
 
-# Over- and under-treatment by threshold
+# Under-/Over-treatment by threshold
 
 
 ```{r}
+
+thresholds <- seq(0.01, 0.99, 0.01)
 names(thresholds) <- thresholds
+
 undertreat_cc <- map(thresholds, ~{
   dca_data %>% 
-  filter(p_cc < threshold) %>% 
-  summarise(
-    npv = mean(y == 0),
-    undertreat = mean(true_p > .x),
-    medical_mistake = mean(true_p > .x & y == 1),
-    model = "CC model"
-  )
+    get_under_treatment("p_cc", .x) %>% 
+    mutate(model = "CC model")
 }) %>% 
   bind_rows(.id = "threshold") %>% 
   mutate(threshold = as.numeric(threshold))
 
 undertreat_cs <- map(thresholds, ~{
   dca_data %>% 
-  filter(p_cs < threshold) %>% 
-  summarise(
-    npv = mean(y == 0),
-    undertreat = mean(true_p > .x),
-    medical_mistake = mean(true_p > .x & y == 1),
-    model = "CS model"
-  )
+    get_under_treatment("p_cs", .x) %>% 
+    mutate(model = "CS model")
 }) %>% 
   bind_rows(.id = "threshold") %>% 
   mutate(threshold = as.numeric(threshold))
 
-ggplot() +
-    geom_line(
-      data = undertreat_cc,
-      aes(threshold, undertreat*1000, color = "CC model")
-    ) +
-   geom_line(
-      data = undertreat_cs,
-      aes(threshold, undertreat*1000, color = "CS model")
-    ) +
-    labs(x = "threshold",
-         y = "Undertreated patients per 1000 persons sent home")
+p1 <- ggplot() +
+  geom_line(
+    data = undertreat_cc,lwd = 1.5,
+    aes(threshold, undertreat*1000, color = "CC model")
+  ) +
+  geom_line(
+    data = undertreat_cs,lwd = 1.5,
+    aes(threshold, undertreat*1000, color = "CS model")
+  ) +
+  labs(x = "threshold", y = "Undertreatment per 1000",
+       subtitle = "Undertreated patients per 1000 persons sent home",
+       color = NULL)
+p1.2 <- ggplot() +
+  geom_line(
+    data = undertreat_cc,linetype=5,lwd = 1.5,
+    aes(threshold, medical_mistake*1000, color = "CC model (Y=1)")
+  ) +
+  geom_line(
+    data = undertreat_cs, linetype=5, lwd = 1.5,
+    aes(threshold, medical_mistake*1000, color = "CS model (Y=1)")
+  ) +
+  labs(x = "threshold", y = "Undertreatment per 1000",
+       subtitle = "Undertreated sick patients per 1000 persons sent home",
+       color = NULL)
+```
+
+
+
+```{r fig.height=6.5}
+get_over_treatment <- function(data, phat, .threshold) {
+  data <- data[data[[phat]] > .threshold, ]
+  data %>% 
+    summarise(
+      npv = mean(y == 0),
+      undertreat = mean(true_p < .threshold),
+      medical_mistake = mean(true_p < .threshold & y == 0)
+    )
+}
+
+
+overtreat_cc <- map(thresholds, ~{
+  dca_data %>% 
+    get_over_treatment("p_cc", .x) %>% 
+    mutate(model = "CC model")
+}) %>% 
+  bind_rows(.id = "threshold") %>% 
+  mutate(threshold = as.numeric(threshold))
+
+overtreat_cs <- map(thresholds, ~{
+  dca_data %>% 
+    get_over_treatment("p_cs", .x) %>% 
+    mutate(model = "CS model")
+}) %>% 
+  bind_rows(.id = "threshold") %>% 
+  mutate(threshold = as.numeric(threshold))
+
+p2 <- ggplot() +
+  geom_line(
+    data = overtreat_cc,lwd = 1.5,
+    aes(threshold, undertreat*1000, color = "CC model")
+  ) +
+  geom_line(
+    data = overtreat_cs,lwd = 1.5,
+    aes(threshold, undertreat*1000, color = "CS model")
+  ) +
+  labs(x = "threshold", y = "Overtreatment per 1000",
+       subtitle = "Overtreated patients per 1000 persons treated",
+       color = NULL)
+
+p2.2 <- ggplot() +
+  geom_line(
+    data = overtreat_cc,linetype=5,lwd = 1.5,
+    aes(threshold, medical_mistake*1000, color = "CC model (Y=0)")
+  ) +
+  geom_line(
+    data = overtreat_cs,linetype=5,lwd = 1.5,
+    aes(threshold, medical_mistake*1000, color = "CS model (Y=0)")
+  ) +
+  labs(x = "threshold", y = "Overtreatment per 1000",
+       subtitle = "Overtreated healthy patients per 1000 persons treated",
+       color = NULL)
+
+(p1 | p1.2) / (p2 | p2.2)
+```
+
+
+# Estimating under-/over-treatment
+
+```{r fit.height=6.5}
+
+
+undertreat_cc_hat <- map(thresholds, ~{
+  dca_data %>% 
+    get_under_treatment("p_cc", .x) %>% 
+    mutate(model = "CC model")
+}) %>% 
+  bind_rows(.id = "threshold") %>% 
+  mutate(threshold = as.numeric(threshold))
+
+undertreat_cs <- map(thresholds, ~{
+  dca_data %>% 
+    get_under_treatment("p_cs", .x) %>% 
+    mutate(model = "CS model")
+}) %>% 
+  bind_rows(.id = "threshold") %>% 
+  mutate(threshold = as.numeric(threshold))
+
+p1 <- ggplot() +
+  geom_line(
+    data = undertreat_cc,lwd = 1.5,
+    aes(threshold, undertreat*1000, color = "CC model")
+  ) +
+  geom_line(
+    data = undertreat_cs,lwd = 1.5,
+    aes(threshold, undertreat*1000, color = "CS model")
+  ) +
+  labs(x = "threshold", y = "Undertreatment per 1000",
+       subtitle = "Undertreated patients per 1000 persons sent home",
+       color = NULL)
+p1.2 <- ggplot() +
+  geom_line(
+    data = undertreat_cc,linetype=5,lwd = 1.5,
+    aes(threshold, medical_mistake*1000, color = "CC model (Y=1)")
+  ) +
+  geom_line(
+    data = undertreat_cs, linetype=5, lwd = 1.5,
+    aes(threshold, medical_mistake*1000, color = "CS model (Y=1)")
+  ) +
+  labs(x = "threshold", y = "Undertreatment per 1000",
+       subtitle = "Undertreated sick patients per 1000 persons sent home",
+       color = NULL)
+
+get_over_treatment <- function(data, phat, .threshold) {
+  data <- data[data[[phat]] > .threshold, ]
+  data %>% 
+    summarise(
+      npv = mean(y == 0),
+      undertreat = mean(true_p < .threshold),
+      medical_mistake = mean(true_p < .threshold & y == 0)
+    )
+}
+
+
+overtreat_cc <- map(thresholds, ~{
+  dca_data %>% 
+    get_over_treatment("p_cc", .x) %>% 
+    mutate(model = "CC model")
+}) %>% 
+  bind_rows(.id = "threshold") %>% 
+  mutate(threshold = as.numeric(threshold))
+
+overtreat_cs <- map(thresholds, ~{
+  dca_data %>% 
+    get_over_treatment("p_cs", .x) %>% 
+    mutate(model = "CS model")
+}) %>% 
+  bind_rows(.id = "threshold") %>% 
+  mutate(threshold = as.numeric(threshold))
+
+p2 <- ggplot() +
+  geom_line(
+    data = overtreat_cc,lwd = 1.5,
+    aes(threshold, undertreat*1000, color = "CC model")
+  ) +
+  geom_line(
+    data = overtreat_cs,lwd = 1.5,
+    aes(threshold, undertreat*1000, color = "CS model")
+  ) +
+  labs(x = "threshold", y = "Overtreatment per 1000",
+       subtitle = "Overtreated patients per 1000 persons treated",
+       color = NULL)
+
+p2.2 <- ggplot() +
+  geom_line(
+    data = overtreat_cc,linetype=5,lwd = 1.5,
+    aes(threshold, medical_mistake*1000, color = "CC model (Y=0)")
+  ) +
+  geom_line(
+    data = overtreat_cs,linetype=5,lwd = 1.5,
+    aes(threshold, medical_mistake*1000, color = "CS model (Y=0)")
+  ) +
+  labs(x = "threshold", y = "Overtreatment per 1000",
+       subtitle = "Overtreated healthy patients per 1000 persons treated",
+       color = NULL)
+
+(p1 | p1.2) / (p2 | p2.2)
+```
+
+
+# Updating the CC model with a CS sample
+
+```{r}
+previous_patients <- c(
+  df_sample_cs$patient_id,
+  df_sample_cc$patient_id,
+  df_val_cc$patient_id,
+  df_val_cs$patient_id
+)
+df_sample_cs_updating <- sample_cross_sectional(
+  df = df_pop %>% 
+    filter(!(patient_id %in% previous_patients)),
+  n = 2e5
+)
+df_cc_updating <- data.frame(
+  y = df_sample_cs_updating$y,
+  LP = predict(fit_cc, newdata = df_sample_cs_updating) - coef(fit_cc)[1]
+)
+fit_cc2 <- lrm(y ~ LP, data = df_cc_updating, x = TRUE, y = TRUE)
+df_val <- data.frame(
+  LP = predict(fit_cc, newdata = df_val_cs) - coef(fit_cc)[1],
+  y = df_val_cs$y
+)
+p_hat_cc2 <- predict(fit_cc2, newdata = df_val, type = "fitted")
+auc_cc2 <- get_auc(df_val$y, p_hat_cc2)
+cat("\nAUC of updated CC model in external CS daya: ", auc_cc2)
+val.prob(p = p_hat_cc2, df_val$y)
+
+par(mfrow = c(1, 2))
+plot(
+  predict(fit_cs, newdata = df_val_cs, type = "fitted"),
+  df_val_cs$p,
+  main = "CS model",
+  xlab = "Predicted probability",
+  ylab = "True probability (really)"
+)
+abline(0, 1, lwd = 3, col = "red", lty = 2)
+plot(
+  p_hat_cc2,
+  df_val_cs$p,
+  main = "CC model\n(updated)",
+  xlab = "Predicted probability",
+  ylab = "True probability (really)"
+)
+abline(0, 1, lwd = 3, col = "red", lty = 2)
+```
+
+# how cool is this?
+
+```{r}
+beta 
+coef(fit_cs) 
+c( coef(fit_cc2)[1],   coef(fit_cc2)[2]*coef(fit_cc)[-1] ) 
+coef(fit_cc) 
+```
+
+# another try on the consequences of cutoffs
+
+## with true probabilities
+
+```{r}
+df_val_cs$p_cc <- p_hat_cc
+df_val_cs$p_cs <- p_hat_cs
+
+consequences_cc <- get_decision_consequences(
+  df_val_cs,
+  phat = "p_cc",
+  .thresholds = thresholds
+)
+consequences_cs <- get_decision_consequences(
+  df_val_cs,
+  phat = "p_cs",
+  .thresholds = thresholds
+)
+
+bind_rows(consequences_cc,
+          consequences_cs) %>% 
+  select(-contains('pv')) %>% 
+  pivot_longer(
+    cols = -c(threshold, estimator)
+  ) %>% 
+  ggplot(aes(threshold, value, color = estimator)) +
+  geom_line() +
+  facet_wrap(~name, scales = "free")
+```
+
+## with internal model
+
+```{r}
+fit_val <- lrm(y ~ x1 + x2 + x3, data = df_val_cs, x = T, y = T)
+df_val_cs$p_tilde <- predict(fit_val, type = "fitted")
+
+consequences_cc_hat <- get_decision_consequences(
+  df_val_cs,
+  phat = "p_cc",
+  p = "p_tilde",
+  .thresholds = thresholds
+)
+consequences_cs_hat <- get_decision_consequences(
+  df_val_cs,
+  phat = "p_cs",
+  p = "p_tilde",
+  .thresholds = thresholds
+)
+
+bind_rows(consequences_cc_hat,
+          consequences_cs_hat) %>% 
+  select(-contains('pv')) %>% 
+  pivot_longer(
+    cols = -c(threshold, estimator)
+  ) %>% 
+  ggplot(aes(threshold, value, color = estimator)) +
+  geom_line() +
+  facet_wrap(~name, scales = "free")
+```
+
+# DCA with p_tilde
+
+$$
+NB_t^{\prime} = \Pr(\hat{p} > t | \tilde{p} > t)\Pr(\tilde{p} > t)
+- \textrm{odds}(t)\Pr(\hat{p} > t | \tilde{p} < t)\Pr(\tilde{p} < t)
+$$
+
+$\tilde{p}$ comes from model fit in the external data.
+
+```{r}
+map(thresholds, ~ {
+  prev <- mean(df_val_cs$p_tilde > .x)
+  se_cc <- mean(
+    df_val_cs$p_cc[df_val_cs$p_tilde > .x] > .x
+  )
+  se_cs <- mean(
+    df_val_cs$p_cs[df_val_cs$p_tilde > .x] > .x
+  )
+  sp_cc <- mean(
+     df_val_cs$p_cc[df_val_cs$p_tilde < .x] < .x
+  )
+  sp_cs <- mean(
+     df_val_cs$p_cs[df_val_cs$p_tilde < .x] < .x
+  )
+  # true values
+  se <- mean(
+    df_val_cs$p[df_val_cs$p_tilde > .x] > .x
+  )
+  sp <- mean(
+     df_val_cs$p[df_val_cs$p_tilde < .x] < .x
+  )
+  data.frame(
+    nb = se*prev - odds(.x)*(1-sp)*(1-prev),
+    nb_cc = se_cc*prev - odds(.x)*(1-sp_cc)*(1-prev),
+    nb_cs = se_cs*prev - odds(.x)*(1-sp_cs)*(1-prev),
+    thr = .x,
+    treat_all = 1*prev - odds(.x)*(1-0)*(1-prev)
+  )
+}) %>% 
+  bind_rows() %>% 
+  ggplot(aes(thr)) +
+  geom_line(aes(y = nb_cc, color = "CC model"), lwd = 2) +
+  geom_line(aes(y = nb_cs, color = "CS model"), lwd = 2) +
+  geom_line(aes(y = nb, color = "true probs"), lwd = 2, lty = 2) +
+  geom_line(aes(y = treat_all, color = "treat all"), lwd = 2, lty = 2) +
+  coord_cartesian(ylim = c(0, 1)) +
+  labs(x = "Threshold", y = "Net benefit (probabilistic)")
+```
+
+
+# traditional dca
+
+
+```{r}
+map(c(0,thresholds), ~ {
+  prev <- mean(df_val_cs$y == 1)
+  se_cc <- mean(
+    df_val_cs$p_cc[df_val_cs$y == 1] > .x
+  )
+  se_cs <- mean(
+    df_val_cs$p_cs[df_val_cs$y == 1] > .x
+  )
+  sp_cc <- mean(
+     df_val_cs$p_cc[df_val_cs$y == 0] < .x
+  )
+  sp_cs <- mean(
+     df_val_cs$p_cs[df_val_cs$y == 0] < .x
+  )
+  # true values
+  se <- mean(
+    df_val_cs$p[df_val_cs$y == 1] > .x
+  )
+  sp <- mean(
+     df_val_cs$p[df_val_cs$y == 0] < .x
+  )
+  data.frame(
+    nb = se*prev - odds(.x)*(1-sp)*(1-prev),
+    nb_cc = se_cc*prev - odds(.x)*(1-sp_cc)*(1-prev),
+    nb_cs = se_cs*prev - odds(.x)*(1-sp_cs)*(1-prev),
+    thr = .x,
+    treat_all = 1*prev - odds(.x)*(1-0)*(1-prev)
+  )
+}) %>% 
+  bind_rows() %>% 
+  ggplot(aes(thr)) +
+  geom_line(aes(y = nb_cc, color = "CC model"), lwd = 2) +
+  geom_line(aes(y = nb_cs, color = "CS model"), lwd = 2) +
+  geom_line(aes(y = nb, color = "true probs"), lwd = 2, lty = 2) +
+  geom_line(aes(y = treat_all, color = "treat all"), lwd = 2, lty = 2) +
+  coord_cartesian(ylim = c(0, NA)) +
+  labs(x = "Threshold", y = "Net benefit (probabilistic)")
 ```

@@ -19,7 +19,6 @@ editor_options:
 library(tidyverse)
 library(ggpubr)
 library(patchwork)
-library(runway)
 library(rms)
 library(rmda)
 theme_set(theme_bw())
@@ -207,7 +206,7 @@ We now fit and perform internal validation with the case-control sample. In orde
 p_hat <- mean(df_sample_cs$y)
 df_sample_cc$.offset <- get_prior_modeling_offset(p_hat = p_hat,
                                                   sampling_ratio = 0.5/0.5)
-fit_cc <- lrm(y ~ x1 + x2 + x3 + offset(.offset), data = df_sample_cc, x = TRUE, y = TRUE)
+fit_cc <- lrm(y ~ x1 + x2 + x3, data = df_sample_cc, x = TRUE, y = TRUE)
 auc_cc <- get_auc_from_fit(fit_cc)
 cat("\nEstimated coeffs: ", exp(coef(fit_cc)[-1]),
     "\nEstimated AUC  (internal validation): ", auc_cc)
@@ -304,9 +303,6 @@ title(main = 'CC model')
 
 * Even though the coefficients for the CS model were nearly 100% accurate, it looks like *underfitting*! (predicted probabilities not extreme enough).
 * CC model systematically underestimated disease probabilities.
-
-> Why is the CS model miscalibrated even when validating with CC data?!
-
 * In summary, when validating with case-control data, we may expect overestimation of discrimination but poor calibration (even with arbitrarily good models).
 
 ### Cross-sectional validation data
@@ -404,14 +400,14 @@ dca_cs <- decision_curve(y ~ p_cs, data = dca_data,
                          thresholds = thresholds,
                          bootstraps = 1)
 dca_true <- decision_curve(y ~ true_p, data = dca_data,
-                         thresholds = thresholds,
-                         bootstraps = 1)
+                           thresholds = thresholds,
+                           bootstraps = 1)
 par(mfrow = c(1, 1))
 plot_decision_curve(
-    list(dca_cs, dca_cc, dca_true),
-    standardize = F,
-    confidence.intervals = F,
-    lty = c(1,1, 2)
+  list(dca_cs, dca_cc, dca_true),
+  standardize = F,
+  confidence.intervals = F,
+  lty = c(1,1, 2)
 )
 ```
 
@@ -436,6 +432,35 @@ plot_decision_curve(
 * If you are worried about undertreatment, it means you want lower thresholds.
 * If your threshold is 10%, you wan to "send home" only people with less than 10% disease probability
 
+### What is the NPV when predictive information is continuous
+
+Say we have a discrete set of predicted probabilities $\hat{p_i}$ and corresponding outcomes $Y_i$ for individuals $i=1,2,\cdots, n$. An individual tests negative when its predicted probability is less than a threshold probability $t$. Them, the negative predictive value, defined as the probability of not having the disease when testing negative, is:
+
+$$
+\begin{align}
+\Pr(Y_i=0 | \textrm{model says "no disease"}) &= \Pr(Y_i=0 | \hat{p_i} < t) &\textrm{(Definition of NPV)}\\
+&= \frac{
+\Pr(Y_i = 0) \Pr(\hat{p_i} < t | Y_i = 0) 
+}{
+\Pr(\hat{p_i} < t)
+} &\textrm{(Bayes Theorem)} \\
+&= \frac{
+\Pr(Y_i = 0) \sum_{j<t}\Pr(\hat{p_i} = j | Y_i = 0) 
+}{
+\sum_{j<t} \Pr(\hat{p_i} = j)
+} &\textrm{(discrete probs.)} \\
+&=(1-\textrm{Prevalence}) \frac{
+\sum_{j<t}\Pr(\hat{p_i} = j | Y_i = 0) 
+}{
+\sum_{j<t} \Pr(\hat{p_i} = j)
+} &\textrm{(Prevalence definition)}
+\end{align}
+$$
+
+So the NPV for a predictive model depends on both the prevalence of the disease and the distribution of the predicted probabilities - marginal and conditional on being healthy. 
+
+> Not sure how to interpret this. But the NPV is hiding a series of individual probabilities.
+
 ### Undertreatment with CC model
 
 
@@ -459,14 +484,14 @@ cat(
 
 ```
 ## 
-## NPV : 0.9195164 
-## People sent home with more than 10% probability:  0.334189 
-## People who should be treated, were not treated, and indeed had the disease:  0.05663658
+## NPV : 0.9381625 
+## People sent home with more than 10% probability:  0.2522782 
+## People who should be treated, were not treated, and indeed had the disease:  0.03505672
 ```
 
 #### Interpretation
 
-> For every 1000 people sent home based on the CC model with a threshold of 10%, we expect about 334 to have a disease probability above 10% (undertreatment). Even though, on average, 920 out of those 1000 will not have the disease, those 334 people should be pretty upset - 57 of which in fact had the disease. This is because their actual disease probability was higher than what the model predicted. Those who didn't have the disease in this group were "lucky".
+> For every 1000 people sent home based on the CC model with a threshold of 10%, we expect about 252 to have a disease probability above 10% (undertreatment). Even though, on average, 938 out of those 1000 will not have the disease, those 252 people should be pretty upset - 35 of which in fact had the disease. This is because their actual disease probability was higher than what the model predicted. Those who didn't have the disease in this group were "lucky".
 
 ### Undertreatment with CS model
 
@@ -521,8 +546,8 @@ cat(
 
 ```
 ## 
-## PPV : 0.7875388 
-## Proportion of people treated with less than 10% probability:  0.2998329
+## PPV : 0.7358053 
+## Proportion of people treated with less than 10% probability:  0.4335651
 ```
 
 
@@ -551,49 +576,237 @@ cat(
 
 
 
-# Over- and under-treatment by threshold
+# Under-/Over-treatment by threshold
 
 
 
 ```r
+get_under_treatment <- function(data, phat, .threshold) {
+  data <- data[data[[phat]] < .threshold, ]
+  data %>% 
+    summarise(
+      npv = mean(y == 0),
+      undertreat = mean(true_p > .threshold),
+      medical_mistake = mean(true_p > .threshold & y == 1)
+    )
+}
+thresholds <- seq(0.01, 0.99, 0.01)
 names(thresholds) <- thresholds
 undertreat_cc <- map(thresholds, ~{
   dca_data %>% 
-  filter(p_cc < threshold) %>% 
-  summarise(
-    npv = mean(y == 0),
-    undertreat = mean(true_p > .x),
-    medical_mistake = mean(true_p > .x & y == 1),
-    model = "CC model"
-  )
+    get_under_treatment("p_cc", .x) %>% 
+    mutate(model = "CC model")
 }) %>% 
   bind_rows(.id = "threshold") %>% 
   mutate(threshold = as.numeric(threshold))
 
 undertreat_cs <- map(thresholds, ~{
   dca_data %>% 
-  filter(p_cs < threshold) %>% 
-  summarise(
-    npv = mean(y == 0),
-    undertreat = mean(true_p > .x),
-    medical_mistake = mean(true_p > .x & y == 1),
-    model = "CS model"
-  )
+    get_under_treatment("p_cs", .x) %>% 
+    mutate(model = "CS model")
 }) %>% 
   bind_rows(.id = "threshold") %>% 
   mutate(threshold = as.numeric(threshold))
 
-ggplot() +
-    geom_line(
-      data = undertreat_cc,
-      aes(threshold, undertreat*1000, color = "CC model")
-    ) +
-   geom_line(
-      data = undertreat_cs,
-      aes(threshold, undertreat*1000, color = "CS model")
-    ) +
-    labs(x = "threshold",
-         y = "Undertreated patients per 1000 persons sent home")
+p1 <- ggplot() +
+  geom_line(
+    data = undertreat_cc,lwd = 1.5,
+    aes(threshold, undertreat*1000, color = "CC model")
+  ) +
+  geom_line(
+    data = undertreat_cc,linetype=2,lwd = 1.5,
+    aes(threshold, medical_mistake*1000, color = "CC model (Y=1)")
+  ) +
+  geom_line(
+    data = undertreat_cs,lwd = 1.5,
+    aes(threshold, undertreat*1000, color = "CS model")
+  ) +
+  geom_line(
+    data = undertreat_cs, linetype = 2, lwd = 1.5,
+    aes(threshold, medical_mistake*1000, color = "CS model (Y=1)")
+  ) +
+  labs(x = "threshold", y = "Undertreatment per 1000",
+       subtitle = "Undertreated patients per 1000 persons sent home",
+       color = NULL)
 ```
 
-![](case-control-simulation-short_files/figure-html/unnamed-chunk-23-1.png)<!-- -->
+
+
+
+```r
+get_over_treatment <- function(data, phat, .threshold) {
+  data <- data[data[[phat]] > .threshold, ]
+  data %>% 
+    summarise(
+      npv = mean(y == 0),
+      undertreat = mean(true_p < .threshold),
+      medical_mistake = mean(true_p < .threshold & y == 0)
+    )
+}
+
+
+overtreat_cc <- map(thresholds, ~{
+  dca_data %>% 
+    get_over_treatment("p_cc", .x) %>% 
+    mutate(model = "CC model")
+}) %>% 
+  bind_rows(.id = "threshold") %>% 
+  mutate(threshold = as.numeric(threshold))
+
+overtreat_cs <- map(thresholds, ~{
+  dca_data %>% 
+    get_over_treatment("p_cs", .x) %>% 
+    mutate(model = "CS model")
+}) %>% 
+  bind_rows(.id = "threshold") %>% 
+  mutate(threshold = as.numeric(threshold))
+
+p2 <- ggplot() +
+  geom_line(
+    data = overtreat_cc,
+    aes(threshold, undertreat*1000, color = "CC model")
+  ) +
+  geom_line(
+    data = overtreat_cc,linetype=2,lwd = 1.5,
+    aes(threshold, medical_mistake*1000, color = "CC model (Y=1)")
+  ) +
+  geom_line(
+    data = overtreat_cs,
+    aes(threshold, undertreat*1000, color = "CS model")
+  ) +
+  geom_line(
+    data = overtreat_cs,linetype=2,lwd = 1.5,
+    aes(threshold, medical_mistake*1000, color = "CS model (Y=1)")
+  ) +
+  labs(x = "threshold", y = "Overtreatment per 1000",
+       subtitle = "Overtreated patients per 1000 persons treated",
+       color = NULL)
+
+p1/p2 & coord_cartesian(ylim = c(0, 400))
+```
+
+![](case-control-simulation-short_files/figure-html/unnamed-chunk-24-1.png)<!-- -->
+
+
+# Updating the CC model with a CS sample
+
+
+```r
+previous_patients <- c(
+  df_sample_cs$patient_id,
+  df_sample_cc$patient_id,
+  df_val_cc$patient_id,
+  df_val_cs$patient_id
+)
+df_sample_cs_updating <- sample_cross_sectional(
+  df = df_pop %>% 
+    filter(!(patient_id %in% previous_patients)),
+  n = 2e5
+)
+df_cc_updating <- data.frame(
+  y = df_sample_cs_updating$y,
+  LP = predict(fit_cc, newdata = df_sample_cs_updating) - coef(fit_cc)[1]
+)
+fit_cc2 <- lrm(y ~ LP, data = df_cc_updating, x = TRUE, y = TRUE)
+df_val <- data.frame(
+  LP = predict(fit_cc, newdata = df_val_cs) - coef(fit_cc)[1],
+  y = df_val_cs$y
+)
+p_hat_cc2 <- predict(fit_cc2, newdata = df_val, type = "fitted")
+auc_cc2 <- get_auc(df_val$y, p_hat_cc2)
+```
+
+```
+## Setting levels: control = 0, case = 1
+```
+
+```
+## Setting direction: controls < cases
+```
+
+```r
+cat("\nAUC of updated CC model in external CS daya: ", auc_cc2)
+```
+
+```
+## 
+## AUC of updated CC model in external CS daya:  0.891
+```
+
+```r
+val.prob(p = p_hat_cc2, df_val$y)
+```
+
+![](case-control-simulation-short_files/figure-html/unnamed-chunk-25-1.png)<!-- -->
+
+```
+##           Dxy       C (ROC)            R2             D      D:Chi-sq 
+##  7.810871e-01  8.905435e-01  5.348984e-01  4.688720e-01  9.378441e+03 
+##           D:p             U      U:Chi-sq           U:p             Q 
+##            NA  7.315193e-05  3.463039e+00  1.770153e-01  4.687989e-01 
+##         Brier     Intercept         Slope          Emax           E90 
+##  1.167009e-01  3.970547e-02  1.018721e+00  1.066141e-02  9.756567e-03 
+##          Eavg           S:z           S:p 
+##  3.965312e-03 -7.018105e-01  4.827974e-01
+```
+
+```r
+par(mfrow = c(1, 2))
+plot(
+  predict(fit_cs, newdata = df_val_cs, type = "fitted"),
+  df_val_cs$p,
+  main = "CS model",
+  xlab = "Predicted probability",
+  ylab = "True probability (really)"
+)
+abline(0, 1, lwd = 3, col = "red", lty = 2)
+plot(
+  p_hat_cc2,
+  df_val_cs$p,
+  main = "CC model\n(updated)",
+  xlab = "Predicted probability",
+  ylab = "True probability (really)"
+)
+abline(0, 1, lwd = 3, col = "red", lty = 2)
+```
+
+![](case-control-simulation-short_files/figure-html/unnamed-chunk-25-2.png)<!-- -->
+
+# how cool is this?
+
+
+```r
+beta 
+```
+
+```
+## [1] -1.6000000  0.1823216 -1.2039728  1.0986123
+```
+
+```r
+coef(fit_cs) 
+```
+
+```
+##  Intercept         x1         x2         x3 
+## -1.6237807  0.1741258 -1.1895951  1.0923274
+```
+
+```r
+c( coef(fit_cc2)[1],   coef(fit_cc2)[2]*coef(fit_cc)[-1] ) 
+```
+
+```
+##  Intercept         x1         x2         x3 
+## -1.6060943  0.1710938 -1.1765576  1.0740554
+```
+
+```r
+coef(fit_cc) 
+```
+
+```
+##  Intercept         x1         x2         x3 
+## -2.7004249  0.4148391 -2.8527165  2.6041868
+```
+
