@@ -279,7 +279,7 @@ dca_true <- decision_curve(y ~ true_p, data = dca_data,
 par(mfrow = c(1, 1))
 plot_decision_curve(
   list(dca_cs, dca_cc, dca_true),
-  standardize = T,
+  standardize = F,
   confidence.intervals = F,
   lty = c(1,1, 2)
 )
@@ -418,6 +418,15 @@ cat(
 
 
 ```{r}
+get_under_treatment <- function(data, phat, .threshold) {
+  data <- data[data[[phat]] < .threshold, ]
+  data %>% 
+    summarise(
+      npv = mean(y == 1),
+      undertreat = mean(true_p > .threshold),
+      medical_mistake = mean(true_p > .threshold & y == 1)
+    )
+}
 
 thresholds <- seq(0.01, 0.99, 0.01)
 names(thresholds) <- thresholds
@@ -716,8 +725,16 @@ bind_rows(consequences_cc,
 ## with internal model
 
 ```{r}
+df_val_cs$lp_cc <- predict(fit_cc, newdata = df_val_cs)
+df_val_cs$lp_cs <- predict(fit_cs, newdata = df_val_cs)
+fit_val_cc <- lrm(y ~ rcs(lp_cc, 5), data = df_val_cs, x = T, y = T)
+fit_val_cs <- lrm(y ~ rcs(lp_cs, 5), data = df_val_cs, x = T, y = T)
 fit_val <- lrm(y ~ x1 + x2 + x3, data = df_val_cs, x = T, y = T)
+
 df_val_cs$p_tilde <- predict(fit_val, type = "fitted")
+df_val_cs$p_tilde_cc <- predict(fit_val_cc, type = "fitted")
+df_val_cs$p_tilde_cs <- predict(fit_val_cs, type = "fitted")
+
 
 consequences_cc_hat <- get_decision_consequences(
   df_val_cs,
@@ -740,7 +757,8 @@ bind_rows(consequences_cc_hat,
   ) %>% 
   ggplot(aes(threshold, value, color = estimator)) +
   geom_line() +
-  facet_wrap(~name, scales = "free")
+  facet_wrap(~name, scales = "free") +
+  theme_minimal()
 ```
 
 # DCA with p_tilde
@@ -835,3 +853,48 @@ map(c(0,thresholds), ~ {
   coord_cartesian(ylim = c(0, NA)) +
   labs(x = "Threshold", y = "Net benefit (probabilistic)")
 ```
+
+# DCA with p_tilde_cc and p_tilde_cs
+
+```{r}
+map(thresholds, ~ {
+  prev <- mean(df_val_cs$p_tilde > .x)
+  prev_cc <- mean(df_val_cs$p_tilde_cc > .x)
+  prev_cs <- mean(df_val_cs$p_tilde_cs > .x)
+  se_cc <- mean(
+    df_val_cs$p_cc[df_val_cs$p_tilde_cc > .x] > .x
+  )
+  se_cs <- mean(
+    df_val_cs$p_cs[df_val_cs$p_tilde_cs > .x] > .x
+  )
+  sp_cc <- mean(
+     df_val_cs$p_cc[df_val_cs$p_tilde_cc < .x] < .x
+  )
+  sp_cs <- mean(
+     df_val_cs$p_cs[df_val_cs$p_tilde_cs < .x] < .x
+  )
+  # true values
+  se <- mean(
+    df_val_cs$p[df_val_cs$p_tilde > .x] > .x
+  )
+  sp <- mean(
+     df_val_cs$p[df_val_cs$p_tilde < .x] < .x
+  )
+  data.frame(
+    nb = se*prev - odds(.x)*(1-sp)*(1-prev),
+    nb_cc = se_cc*prev_cc - odds(.x)*(1-sp_cc)*(1-prev_cc),
+    nb_cs = se_cs*prev_cs - odds(.x)*(1-sp_cs)*(1-prev_cs),
+    thr = .x,
+    treat_all = 1*prev - odds(.x)*(1-0)*(1-prev)
+  )
+}) %>% 
+  bind_rows() %>% 
+  ggplot(aes(thr)) +
+  geom_line(aes(y = nb_cc, color = "CC model"), lwd = 2) +
+  geom_line(aes(y = nb_cs, color = "CS model"), lwd = 2) +
+  geom_line(aes(y = nb, color = "true probs"), lwd = 2, lty = 2) +
+  geom_line(aes(y = treat_all, color = "treat all"), lwd = 2, lty = 2) +
+  coord_cartesian(ylim = c(0, 1)) +
+  labs(x = "Threshold", y = "Net benefit (probabilistic)")
+```
+

@@ -2,20 +2,27 @@
 output: 
   html_document:
     keep_md: yes
+    code_folding: hide
 editor_options:
   chunk_output_type: console
 ---
 
+```{r echo=FALSE}
+knitr::opts_chunk$set(
+  fig.width = 10,
+  fig.height = 4,
+  dpi = 300,
+  echo = FALSE,
+  message = FALSE,
+  warning = FALSE
+)
+```
 
+# Summary
 
-# Simulating study design effect on diagnostic models
+The objective of this document is to report initial investigation over the impact of spectrum bias on the development and validation of diagnostic models. From a simulated population, we take samples according to either (i) a case-control (CC) design or (ii) a cross-sectional (CS) design (analogous to diagnostic test accuracy design). We use these samples to fit two models -- CC model and CS model, respectively. We evaluate the fitted parameters as well as the consistency of estimated performance during internal validation. We then simulate new, independent CC and CS samples for external validation. Both CC and CS models are evaluated in the CC and CS external samples. A large sample size of $N = 20000$ is used for all samples. Preliminary conclusions and potential next steps are reported. Data and code to reproduce analyses in this document are available [here](https://github.com/giulianonetto/msc-project/tree/main/spectrum-bias). 
 
-* Compare cross-sectional (CS) vs case-control (CC) designs for diagnostic model development and validation (internal and external)
-
-# Load packages
-
-
-```r
+```{r load_pkgs}
 library(tidyverse)
 library(ggpubr)
 library(patchwork)
@@ -25,14 +32,14 @@ theme_set(theme_bw())
 source("R/functions.R")  # load helper functions
 ```
 
-# Simulating the population
-
-* population of 1M individuals. 
-* for each individual, we simulate continuous traits (eg blood biomarkers) using multivariate normal distribution, fix a set of (logistic) regression coefficients, and then use their linear combination to define the their true underlying probability of a binary outcome (e.g. having cancer).
-* given the true probabilities, we then simulate the outcome itself.
+# Background
 
 
-```r
+# Simulated population
+
+We will simulate population of `n_pop=1e6` individuals. For each individual, we simulate continuous traits (e.g., blood biomarkers) using a multivariate normal distribution, fix a set of (logistic) regression coefficients, and then use their linear combination to define the their true underlying probability of a binary outcome (e.g., having cancer). Given the true probabilities, we then simulate the outcome itself.
+
+```{r simulate_pop}
 SEED <- 123456
 n_pop <- 1e6
 X <- get_X(
@@ -43,7 +50,7 @@ X <- get_X(
   .seed = SEED
 )
 
-beta <- c(-1.6, log(1.2), log(.3), log(3))
+beta <- c(-1.6, log(1.2), log(.3), log(3))  # true log(OR)
 p <- plogis(X %*% beta)
 y <- rbinom(n = n_pop, size = 1, prob = p)
 df_pop <- data.frame(
@@ -57,118 +64,63 @@ df_pop <- data.frame(
 head(df_pop)
 ```
 
-```
-##   patient_id y           p         x1         x2         x3
-## 1  patient-1 1 0.569076442 -0.7526996  1.0739182  3.0113315
-## 2  patient-2 0 0.028950911  1.2866018  0.6818114 -1.2074034
-## 3  patient-3 1 0.833946085 -0.1814995 -0.9592696  1.9042323
-## 4  patient-4 0 0.123629566 -0.1494707  0.0422046 -0.2552622
-## 5  patient-5 0 0.005517657 -1.3382222  3.5962228  0.8915541
-## 6  patient-6 0 0.026553208 -0.6837702  1.1444403 -0.4543473
-```
+## Baseline characteristics
 
 Prevalence of disease (or the average underlying probability) is about 30%.
 
-
-```r
+```{r}
 df_pop %>% 
   summarise(mean(y), mean(p))
 ```
 
-```
-##    mean(y)  mean(p)
-## 1 0.292072 0.292702
-```
+The coefficient vector implies that `x1`, `x2`, and `x3` are important predictors
 
-The coefficient vector implies that `x1` and `x2` have moderate predictor effects, while `x3` is just noise.
-
-
-```r
+```{r}
 group_differences(df_pop)
 ```
 
-```
-## # A tibble: 1 × 3
-##   x1_diff x2_diff x3_diff
-##     <dbl>   <dbl>   <dbl>
-## 1   0.477   -1.41    1.24
-```
+We can plot the distribution of underlying disease probabilities and assess the maximum possible discrimination in this setting (how well the cases and controls are separated by their corresponding disease probabilities).
 
-* distribution of disease probabilities. 
-* maximum possible discrimination in this setting (how well the cases and controls are separated by their corresponding disease probabilities)
-
-
-```r
+```{r}
 .title <- paste0(
   "max AUC ", get_auc(df_pop$y, df_pop$p)
 )
 plot_disease_prob(df_pop[sample(1:n_pop, 2e4),], title = .title)
 ```
 
-![](case-control-simulation-short_files/figure-html/unnamed-chunk-6-1.png)<!-- -->
-
 # Simulating a cross-section sample
 
 * large sample size of `n_sample = 10000` such that we don't suffer much from sampling variability.
 
-
-```r
+```{r}
 n_sample <- 1e4
 df_sample_cs <- sample_cross_sectional(df = df_pop, n = n_sample)
 ```
 
 The function `sample_cross_sectional` just takes an uniformly random sample from `df` of size `n`, such that the result (`df_sample_cs`) is representative of the overall population.
 
-
-```r
+```{r}
 .title <- paste0(
   "estimated AUC ", get_auc(df_sample_cs$y, df_sample_cs$p)
 )
-```
-
-```
-## Setting levels: control = 0, case = 1
-```
-
-```
-## Setting direction: controls < cases
-```
-
-```r
 plot_disease_prob(df = df_sample_cs, title = .title)
 ```
-
-![](case-control-simulation-short_files/figure-html/unnamed-chunk-8-1.png)<!-- -->
 
 
 # Simulating a case-control sample
 
 
-
-```r
+```{r}
 cc_cutoffs <- c(0.3, 0.7)
 df_sample_cc <- sample_case_control(df = df_pop, n = n_sample, 
                                     cutoffs = cc_cutoffs)
 .title <- paste0(
   "estimated AUC ", get_auc(df_sample_cc$y, df_sample_cc$p)
 )
-```
-
-```
-## Setting levels: control = 0, case = 1
-```
-
-```
-## Setting direction: controls < cases
-```
-
-```r
 plot_disease_prob(df = df_sample_cc, title = .title)
 ```
 
-![](case-control-simulation-short_files/figure-html/unnamed-chunk-9-1.png)<!-- -->
-
-In the function `sample_case_control`, we take all cases, exclude those with probability of disease less than 30%, and then sample randomly from the ones left. We do it similarly for controls with probability of disease no larger than 70%. The rationale for this is to simulate the situation where you have a random sample from a setting (e.g. a hospital), but those patients at the hospital never go below 30% chance of disease - everyone is fairly clearly sick.
+In the function `sample_case_control`, we take all cases, exclude those with probability of disease less than `r cc_cutoffs[1]*100`%, and then sample randomly from the ones left. We do it similarly for controls with probability of disease no larger than `r cc_cutoffs[2]*100`%. The rationale for this is to simulate the situation where you have a random sample from a setting (e.g. a hospital), but those patients at the hospital never go below `r cc_cutoffs[1]*100`% chance of disease - everyone is fairly clearly sick.
 
 
 # Modeling
@@ -181,18 +133,11 @@ Now that we have two large samples from our population, one following a cross-se
 
 We first fit and perform internal validation with the cross-sectional sample.
 
-
-```r
+```{r}
 fit_cs <- lrm(y ~ x1 + x2 + x3, data = df_sample_cs, x = TRUE, y = TRUE)
 auc_cs <- get_auc_from_fit(fit_cs)
 cat("\nEstimated coeffs: ", exp(coef(fit_cs)[-1]),
     "\nEstimated AUC (internal validation): ", auc_cs)
-```
-
-```
-## 
-## Estimated coeffs:  1.190205 0.3043445 2.981205 
-## Estimated AUC (internal validation):  0.8888922
 ```
 
 Notice that our estimated coefficients match almost perfectly the true values used to generate the data. Accordingly, the AUC is close to the maximum value for this population. The cross-sectional sample is representative and large enough to yield a nearly perfect model.
@@ -201,8 +146,7 @@ Notice that our estimated coefficients match almost perfectly the true values us
 
 We now fit and perform internal validation with the case-control sample. In order to get the intercept right, we need to adjust for the expected disease prevalence. We can use an offset in the model as a way to perform correction by prior modeling. This will make sure that the 1:1 sampling design doesn't hurt calibration by itself. We will use the cross-sectional data to estimate the true prevalence. Here, the `sampling_ratio` is `0.5/0.5 = 1` as we have a 1:1 design.
 
-
-```r
+```{r}
 p_hat <- mean(df_sample_cs$y)
 df_sample_cc$.offset <- get_prior_modeling_offset(p_hat = p_hat,
                                                   sampling_ratio = 0.5/0.5)
@@ -212,12 +156,6 @@ cat("\nEstimated coeffs: ", exp(coef(fit_cc)[-1]),
     "\nEstimated AUC  (internal validation): ", auc_cc)
 ```
 
-```
-## 
-## Estimated coeffs:  1.514127 0.0576874 13.52023 
-## Estimated AUC  (internal validation):  0.9675967
-```
-
 * estimated coefficients too extreme (even though this is a very large sample n = 10000). 
 * estimated AUC from the internal validation is way too optimistic
 
@@ -225,8 +163,7 @@ cat("\nEstimated coeffs: ", exp(coef(fit_cc)[-1]),
 
 * two independent samples from the population, one with each design, excluding patients that where used for model fitting.
 
-
-```r
+```{r}
 development_patients <- c(
   df_sample_cs$patient_id,
   df_sample_cc$patient_id
@@ -249,57 +186,28 @@ df_val_cc <- sample_case_control(
 
 Let's see how the models perform in terms of discrimination.
 
-
-```r
+```{r}
 newdata <- df_val_cc
 p_hat_cs <- predict(fit_cs, newdata = newdata, type = "fitted")
 p_hat_cc <- predict(fit_cc, newdata = newdata, type = "fitted")
 auc_cs <- get_auc(newdata$y, p_hat_cs)
-```
-
-```
-## Setting levels: control = 0, case = 1
-```
-
-```
-## Setting direction: controls < cases
-```
-
-```r
 auc_cc <- get_auc(newdata$y, p_hat_cc)
-```
-
-```
-## Setting levels: control = 0, case = 1
-## Setting direction: controls < cases
-```
-
-```r
 cat(
   "Estimated AUC (Case-control external validation):\nCross-sectional training: ", auc_cs,
   "\nCase-control training:", auc_cc
 )
 ```
 
-```
-## Estimated AUC (Case-control external validation):
-## Cross-sectional training:  0.97 
-## Case-control training: 0.97
-```
-
 * Case-control external validation overestimated discrimination
 * Both training design types yielded the same estimated discrimination
 
-
-```r
+```{r}
 par(mfrow = c(1, 2))
 cal_cs <- val.prob(y = newdata$y, p = p_hat_cs)
 title(main = 'CS model')
 cal_cc <- val.prob(y = newdata$y, p = p_hat_cc)
 title(main = 'CC model')
 ```
-
-![](case-control-simulation-short_files/figure-html/unnamed-chunk-14-1.png)<!-- -->
 
 * Even though the coefficients for the CS model were nearly 100% accurate, it looks like *underfitting*! (predicted probabilities not extreme enough).
 * CC model systematically underestimated disease probabilities.
@@ -309,49 +217,22 @@ title(main = 'CC model')
 
 Let's see how the models perform in terms of discrimination.
 
-
-```r
+```{r}
 newdata <- df_val_cs
 p_hat_cs <- predict(fit_cs, newdata = newdata, type = "fitted")
 p_hat_cc <- predict(fit_cc, newdata = newdata, type = "fitted")
 auc_cs <- get_auc(newdata$y, p_hat_cs)
-```
-
-```
-## Setting levels: control = 0, case = 1
-```
-
-```
-## Setting direction: controls < cases
-```
-
-```r
 auc_cc <- get_auc(newdata$y, p_hat_cc)
-```
-
-```
-## Setting levels: control = 0, case = 1
-## Setting direction: controls < cases
-```
-
-```r
 cat(
   "Estimated AUC (Cross-sectional validation):\nCross-sectional training: ", auc_cs,
   "\nCase-control training:", auc_cc
 )
 ```
 
-```
-## Estimated AUC (Cross-sectional validation):
-## Cross-sectional training:  0.891 
-## Case-control training: 0.891
-```
-
 * both models perform equally well in terms of discrimination. 
 * estimated discrimination makes sense (respects maximum possible)
 
-
-```r
+```{r}
 par(mfrow = c(1, 2))
 cal_cs <- val.prob(y = newdata$y, p = p_hat_cs)
 title(main = 'CS model')
@@ -359,23 +240,18 @@ cal_cc <- val.prob(y = newdata$y, p = p_hat_cc)
 title(main = 'CC model')
 ```
 
-![](case-control-simulation-short_files/figure-html/unnamed-chunk-16-1.png)<!-- -->
-
 * CS model is well-calibrated
 * CC model shows massive *overfitting*: predicted probabilities are too extreme - liekly due to overestimated coefficients.
 
 We know this second calibration plot is representative of the *true calibration* - check with the true disease probabilities used to generate the data:
 
-
-```r
+```{r}
 par(mfrow = c(1, 2))
 plot(p_hat_cs, newdata$p, main = "CS model", xlab = "Predicted Probability")
 abline(0, 1, col = "red")
 plot(p_hat_cc, newdata$p, main = "CC model", xlab = "Predicted Probability")
 abline(0, 1, col = "red")
 ```
-
-![](case-control-simulation-short_files/figure-html/unnamed-chunk-17-1.png)<!-- -->
 
 
 # Is it OK to use the CC model? 
@@ -384,8 +260,7 @@ Let's assess the consequences of model-based decisions.
 
 ## Decision curve analysis
 
-
-```r
+```{r fig.height=5.5}
 dca_data <- data.frame(
   y = newdata$y,
   true_p = newdata$p,
@@ -413,12 +288,6 @@ plot_decision_curve(
   lty = c(1,1, 2)
 )
 ```
-
-```
-## Note: When multiple decision curves are plotted, decision curves for 'All' are calculated using the prevalence from the first DecisionCurve object in the list provided.
-```
-
-![](case-control-simulation-short_files/figure-html/unnamed-chunk-18-1.png)<!-- -->
 
 
 * CS model matches best net benefit possible
@@ -466,8 +335,7 @@ So the NPV for a predictive model depends on both the prevalence of the disease 
 
 ### Undertreatment with CC model
 
-
-```r
+```{r}
 threshold <- 0.1
 df_undertreat <- dca_data %>% 
   filter(p_cc < threshold) %>% 
@@ -485,21 +353,13 @@ cat(
 )
 ```
 
-```
-## 
-## NPV : 0.9381625 
-## People sent home with more than 10% probability:  0.2522782 
-## People who should be treated, were not treated, and indeed had the disease:  0.03505672
-```
-
 #### Interpretation
 
-> For every 1000 people sent home based on the CC model with a threshold of 10%, we expect about 252 to have a disease probability above 10% (undertreatment). Even though, on average, 938 out of those 1000 will not have the disease, those 252 people should be pretty upset - 35 of which in fact had the disease. This is because their actual disease probability was higher than what the model predicted. Those who didn't have the disease in this group were "lucky".
+> For every 1000 people sent home based on the CC model with a threshold of 10%, we expect about `r round(df_undertreat$undertreat*1000)` to have a disease probability above 10% (undertreatment). Even though, on average, `r round(df_undertreat$npv*1000)` out of those 1000 will not have the disease, those `r round(df_undertreat$undertreat*1000)` people should be pretty upset - `r round(df_undertreat$medical_mistake*1000)` of which in fact had the disease. This is because their actual disease probability was higher than what the model predicted. Those who didn't have the disease in this group were "lucky".
 
 ### Undertreatment with CS model
 
-
-```r
+```{r}
 df_undertreat <- dca_data %>% 
   filter(p_cs < threshold) %>% 
   summarise(
@@ -516,13 +376,6 @@ cat(
 )
 ```
 
-```
-## 
-## NPV : 0.9634116 
-## People sent home with more than 10% probability:  0.006551298 
-## People who should be treated, were not treated, and indeed had the disease:  0.0009888752
-```
-
 
 ## Overtreatment due to miscalibration
 
@@ -531,8 +384,7 @@ cat(
 
 ### Overtreatment CC model
 
-
-```r
+```{r}
 threshold <- 0.7
 df_overtreat <- dca_data %>% 
   filter(p_cc > threshold) %>% 
@@ -547,17 +399,10 @@ cat(
 )
 ```
 
-```
-## 
-## PPV : 0.7358053 
-## Proportion of people treated with less than 10% probability:  0.4335651
-```
-
 
 ### Overtreatment with CS model
 
-
-```r
+```{r}
 df_overtreat <- dca_data %>% 
   filter(p_cs > threshold) %>% 
   summarise(
@@ -571,19 +416,12 @@ cat(
 )
 ```
 
-```
-## 
-## PPV : 0.8581535 
-## Proportion of people treated with less than 10% probability:  0
-```
-
 
 
 # Under-/Over-treatment by threshold
 
 
-
-```r
+```{r}
 get_under_treatment <- function(data, phat, .threshold) {
   data <- data[data[[phat]] < .threshold, ]
   data %>% 
@@ -641,8 +479,7 @@ p1.2 <- ggplot() +
 
 
 
-
-```r
+```{r fig.height=6.5}
 get_over_treatment <- function(data, phat, .threshold) {
   data <- data[data[[phat]] > .threshold, ]
   data %>% 
@@ -699,13 +536,12 @@ p2.2 <- ggplot() +
 (p1 | p1.2) / (p2 | p2.2)
 ```
 
-![](case-control-simulation-short_files/figure-html/unnamed-chunk-24-1.png)<!-- -->
-
 
 # Estimating under-/over-treatment
 
+```{r fit.height=6.5}
 
-```r
+
 undertreat_cc_hat <- map(thresholds, ~{
   dca_data %>% 
     get_under_treatment("p_cc", .x) %>% 
@@ -803,13 +639,10 @@ p2.2 <- ggplot() +
 (p1 | p1.2) / (p2 | p2.2)
 ```
 
-![](case-control-simulation-short_files/figure-html/unnamed-chunk-25-1.png)<!-- -->
-
 
 # Updating the CC model with a CS sample
 
-
-```r
+```{r}
 previous_patients <- c(
   df_sample_cs$patient_id,
   df_sample_cc$patient_id,
@@ -832,43 +665,9 @@ df_val <- data.frame(
 )
 p_hat_cc2 <- predict(fit_cc2, newdata = df_val, type = "fitted")
 auc_cc2 <- get_auc(df_val$y, p_hat_cc2)
-```
-
-```
-## Setting levels: control = 0, case = 1
-```
-
-```
-## Setting direction: controls < cases
-```
-
-```r
 cat("\nAUC of updated CC model in external CS daya: ", auc_cc2)
-```
-
-```
-## 
-## AUC of updated CC model in external CS daya:  0.891
-```
-
-```r
 val.prob(p = p_hat_cc2, df_val$y)
-```
 
-![](case-control-simulation-short_files/figure-html/unnamed-chunk-26-1.png)<!-- -->
-
-```
-##           Dxy       C (ROC)            R2             D      D:Chi-sq 
-##  7.810871e-01  8.905435e-01  5.348984e-01  4.688720e-01  9.378441e+03 
-##           D:p             U      U:Chi-sq           U:p             Q 
-##            NA  7.315193e-05  3.463039e+00  1.770153e-01  4.687989e-01 
-##         Brier     Intercept         Slope          Emax           E90 
-##  1.167009e-01  3.970547e-02  1.018721e+00  1.066141e-02  9.756567e-03 
-##          Eavg           S:z           S:p 
-##  3.965312e-03 -7.018105e-01  4.827974e-01
-```
-
-```r
 par(mfrow = c(1, 2))
 plot(
   predict(fit_cs, newdata = df_val_cs, type = "fitted"),
@@ -888,52 +687,20 @@ plot(
 abline(0, 1, lwd = 3, col = "red", lty = 2)
 ```
 
-![](case-control-simulation-short_files/figure-html/unnamed-chunk-26-2.png)<!-- -->
-
 # how cool is this?
 
-
-```r
+```{r}
 beta 
-```
-
-```
-## [1] -1.6000000  0.1823216 -1.2039728  1.0986123
-```
-
-```r
 coef(fit_cs) 
-```
-
-```
-##  Intercept         x1         x2         x3 
-## -1.6237807  0.1741258 -1.1895951  1.0923274
-```
-
-```r
 c( coef(fit_cc2)[1],   coef(fit_cc2)[2]*coef(fit_cc)[-1] ) 
-```
-
-```
-##  Intercept         x1         x2         x3 
-## -1.6060943  0.1710938 -1.1765576  1.0740554
-```
-
-```r
 coef(fit_cc) 
-```
-
-```
-##  Intercept         x1         x2         x3 
-## -2.7004249  0.4148391 -2.8527165  2.6041868
 ```
 
 # another try on the consequences of cutoffs
 
 ## with true probabilities
 
-
-```r
+```{r}
 df_val_cs$p_cc <- p_hat_cc
 df_val_cs$p_cs <- p_hat_cs
 
@@ -959,12 +726,9 @@ bind_rows(consequences_cc,
   facet_wrap(~name, scales = "free")
 ```
 
-![](case-control-simulation-short_files/figure-html/unnamed-chunk-28-1.png)<!-- -->
-
 ## with internal model
 
-
-```r
+```{r}
 df_val_cs$lp_cc <- predict(fit_cc, newdata = df_val_cs)
 df_val_cs$lp_cs <- predict(fit_cs, newdata = df_val_cs)
 fit_val_cc <- lrm(y ~ rcs(lp_cc, 5), data = df_val_cs, x = T, y = T)
@@ -1001,8 +765,6 @@ bind_rows(consequences_cc_hat,
   theme_minimal()
 ```
 
-![](case-control-simulation-short_files/figure-html/unnamed-chunk-29-1.png)<!-- -->
-
 # DCA with p_tilde
 
 $$
@@ -1012,8 +774,7 @@ $$
 
 $\tilde{p}$ comes from model fit in the external data.
 
-
-```r
+```{r}
 map(thresholds, ~ {
   prev <- mean(df_val_cs$p_tilde > .x)
   se_cc <- mean(
@@ -1053,14 +814,11 @@ map(thresholds, ~ {
   labs(x = "Threshold", y = "Net benefit (probabilistic)")
 ```
 
-![](case-control-simulation-short_files/figure-html/unnamed-chunk-30-1.png)<!-- -->
-
 
 # traditional dca
 
 
-
-```r
+```{r}
 map(c(0,thresholds), ~ {
   prev <- mean(df_val_cs$y == 1)
   se_cc <- mean(
@@ -1100,12 +858,9 @@ map(c(0,thresholds), ~ {
   labs(x = "Threshold", y = "Net benefit (probabilistic)")
 ```
 
-![](case-control-simulation-short_files/figure-html/unnamed-chunk-31-1.png)<!-- -->
-
 # DCA with p_tilde_cc and p_tilde_cs
 
-
-```r
+```{r}
 map(thresholds, ~ {
   prev <- mean(df_val_cs$p_tilde > .x)
   prev_cc <- mean(df_val_cs$p_tilde_cc > .x)
@@ -1146,6 +901,4 @@ map(thresholds, ~ {
   coord_cartesian(ylim = c(0, 1)) +
   labs(x = "Threshold", y = "Net benefit (probabilistic)")
 ```
-
-![](case-control-simulation-short_files/figure-html/unnamed-chunk-32-1.png)<!-- -->
 

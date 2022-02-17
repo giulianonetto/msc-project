@@ -108,24 +108,32 @@ plot_disease_prob_stacked <- function(df) {
     scale_x_continuous(breaks = scales::pretty_breaks(5)) 
 }
 
-plot_disease_prob_nonstacked <- function(df) {
+plot_disease_prob_nonstacked <- function(df, .geom = NULL) {
+  p1 <- df %>% 
+    filter(y == 0) %>% 
+    ggplot(aes(x = p, fill = factor(y))) +
+    geom_histogram(fill = "skyblue", bins = 30) +
+    labs(x = NULL) +
+    scale_x_continuous(breaks = scales::pretty_breaks(5)) +
+    coord_cartesian(xlim = c(0, 1)) +
+    theme_minimal() +
+    bgcolor("white")
+  p2 <- df %>% 
+    filter(y == 1) %>% 
+    ggplot(aes(x = p, fill = factor(y))) +
+    geom_histogram(fill = "magenta", bins = 30) +
+    scale_x_continuous(breaks = scales::pretty_breaks(5)) +
+    coord_cartesian(xlim = c(0, 1)) +
+    theme_minimal() +
+    bgcolor("white") +
+    labs(x = "Disease probability")
+  if (!is.null(.geom)) {
+    p1 <- p1 + .geom
+    p2 <- p2 + .geom
+  }
   ggarrange(
-    df %>% 
-      filter(y == 0) %>% 
-      ggplot(aes(x = p, fill = factor(y))) +
-      geom_histogram(fill = "skyblue", bins = 30) +
-      labs(x = NULL) +
-      scale_x_continuous(breaks = scales::pretty_breaks(5)) +
-      coord_cartesian(xlim = c(0, 1)) +
-      theme_minimal(),
-    df %>% 
-      filter(y == 1) %>% 
-      ggplot(aes(x = p, fill = factor(y))) +
-      geom_histogram(fill = "magenta", bins = 30) +
-      scale_x_continuous(breaks = scales::pretty_breaks(5)) +
-      coord_cartesian(xlim = c(0, 1)) +
-      theme_minimal() +
-      labs(x = "Disease probability"),
+    p1,
+    p2,
     nrow = 2
   )
 }
@@ -135,11 +143,11 @@ plot_disease_prob <- function(df, title = NULL) {
     plot_disease_prob_stacked(df),
     plot_disease_prob_nonstacked(df),
     ncol = 2
-  )
+  ) 
   if (!is.null(title)) {
     p <- annotate_figure(p, top = title)
   }
-  p
+  p + bgcolor("white")
 }
 
 format2 <- function(x, .digits = 3) {
@@ -179,4 +187,10 @@ get_decision_consequences <- function(data, phat, .thresholds,
       estimator = phat
     )
   
+}
+
+print_coef <- function(x) {
+  x <- c(x[1], exp(x[-1]))
+  names(x)[-1] <- paste0("Gene", 1:length(x[-1]))
+  print(x)
 }
