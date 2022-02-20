@@ -6,9 +6,8 @@ library(rms)
 library(rmda)
 library(pROC)
 install.packages('predtools'); library(predtools)
-source("R/functions.R") 
 theme_set(theme_bw())
-
+source("R/functions.R") 
 # create output dir for figures and stuff
 dir.create("output/report", showWarnings = FALSE)
 
@@ -19,7 +18,7 @@ n_pop <- 1e6
 X <- get_X(
   n = n_pop,
   v = 2,                  # common variance
-  corr = c(-0.2, 0, 0),   # correlations x1-x2, x1-x3, x2-x3
+  corr = c(0, 0, 0),   # correlations x1-x2, x1-x3, x2-x3
   mu = c(0, 0, 0),        # all centered
   .seed = SEED
 )
@@ -43,22 +42,27 @@ head(df_pop)
 .title <- paste0(
   "max AUC ", get_auc(df_pop$y, df_pop$p)
 )
-.p <- plot_disease_prob(df_pop[sample(1:n_pop, 2e4),], title = .title)
+.p <- plot_disease_prob(df_pop, title = .title)
 ggsave("output/report/pop-risk-distribution.png", 
-       .p, width = 10, height = 4)
+       .p, width = 10, height = 4, bg = 'white')
+
+round(mean(between(df_pop[df_pop$y == 0, "p"], 0.8, 1))*100,2)
+round(mean(between(df_pop[df_pop$y == 1, "p"], 0, 0.3))*100,2) # 20% of cases have risk btw 0 and 30%
 
 # Samples ----
 
 ## cross-sectional ----
-n_sample <- 1e4
+n_sample <- 2e4
 df_sample_cs <- sample_cross_sectional(df = df_pop, n = n_sample)
 .title <- paste0(
   "best possible AUC with this sample ", get_auc(df_sample_cs$y, df_sample_cs$p)
 )
 .p <- plot_disease_prob(df = df_sample_cs, title = .title)
 ggsave("output/report/sample-cs-risk-distribution.png", 
-       .p, width = 10, height = 4)
+       .p, width = 10, height = 4, bg = 'white')
 
+round(mean(between(df_sample_cs[df_sample_cs$y == 0, "p"], 0.8, 1))*100, 2)
+round(mean(between(df_sample_cs[df_sample_cs$y == 1, "p"], 0, 0.3))*100,2)
 ## Case-control ----
 
 ### mechanism ----

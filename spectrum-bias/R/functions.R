@@ -115,17 +115,13 @@ plot_disease_prob_nonstacked <- function(df, .geom = NULL) {
     geom_histogram(fill = "skyblue", bins = 30) +
     labs(x = NULL) +
     scale_x_continuous(breaks = scales::pretty_breaks(5)) +
-    coord_cartesian(xlim = c(0, 1)) +
-    theme_minimal() +
-    bgcolor("white")
+    coord_cartesian(xlim = c(0, 1)) 
   p2 <- df %>% 
     filter(y == 1) %>% 
     ggplot(aes(x = p, fill = factor(y))) +
     geom_histogram(fill = "magenta", bins = 30) +
     scale_x_continuous(breaks = scales::pretty_breaks(5)) +
     coord_cartesian(xlim = c(0, 1)) +
-    theme_minimal() +
-    bgcolor("white") +
     labs(x = "Disease probability")
   if (!is.null(.geom)) {
     p1 <- p1 + .geom
@@ -147,7 +143,7 @@ plot_disease_prob <- function(df, title = NULL) {
   if (!is.null(title)) {
     p <- annotate_figure(p, top = title)
   }
-  p + bgcolor("white")
+  p
 }
 
 format2 <- function(x, .digits = 3) {
