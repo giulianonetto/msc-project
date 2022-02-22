@@ -18,9 +18,12 @@ odds <- function(p) p/(1-p)
 inv_odds <- function(o) o/(1 + o)
 logit <- function(p) log(odds(p))
 inv_logit <- function(p) plogis(p)
-add_noise <- function(p, sd = 0.5) inv_logit(
-  logit(p) + rnorm(length(p), mean = 0, sd = sd)
-)
+add_noise <- function(p, sd = 0.5, .seed = NULL) {
+  set.seed(.seed)
+  inv_logit(
+    logit(p) + rnorm(length(p), mean = 0, sd = sd)
+  )
+}
 get_auc <- function(y, x, .digits = 3) round(
   pROC::auc(y, x), .digits
 )
@@ -34,7 +37,8 @@ get_prior_modeling_offset <- function(p_hat, sampling_ratio) {
 }
 
 sample_case_control <- function(df, n = 200,
-                                noise = NULL, cutoffs = NULL) {
+                                noise = NULL, cutoffs = NULL,
+                                .seed = NULL) {
 
   "
   instead of outcome risk, use predictor value for sampling probability?
@@ -53,17 +57,19 @@ sample_case_control <- function(df, n = 200,
     p_controls <- 1 - df$p[df$y == 0]
     
     if (!is.null(noise)) {
-      p_cases <- add_noise(p = p_cases, sd = noise)
-      p_controls <- add_noise(p = p_controls, sd = noise)
+      p_cases <- add_noise(p = p_cases, sd = noise, .seed = .seed)
+      p_controls <- add_noise(p = p_controls, sd = noise, .seed = .seed)
     }
     
   }
   
+  set.seed(.seed)
   cases_ix <- sample(
     which(df$y == 1),
     round(n/2),
     prob = p_cases
   )
+  set.seed(.seed)
   controls_ix <- sample(
     which(df$y == 0),
     round(n/2),
@@ -78,7 +84,8 @@ sample_case_control <- function(df, n = 200,
   return(df[c(cases_ix, controls_ix),])
 }
 
-sample_cross_sectional <- function(df, n) {
+sample_cross_sectional <- function(df, n, .seed = NULL) {
+  set.seed(.seed)
   cs_sample_ix <- sample(1:nrow(df), n)
   return(df[cs_sample_ix, ])
 }
@@ -186,7 +193,7 @@ get_decision_consequences <- function(data, phat, .thresholds,
 }
 
 print_coef <- function(x) {
-  x <- c(x[1], exp(x[-1]))
+  x <- round(c(x[1], exp(x[-1])), 2)
   names(x)[-1] <- paste0("Gene", 1:length(x[-1]))
   print(x)
 }

@@ -5,6 +5,7 @@ library(patchwork)
 library(rms)
 library(rmda)
 library(pROC)
+#library(caret) # only createFolds function used
 install.packages('predtools'); library(predtools)
 theme_set(theme_bw())
 source("R/functions.R") 
@@ -25,6 +26,7 @@ X <- get_X(
 
 beta <- c(-1.6, log(1.2), log(.3), log(3))
 p <- plogis(X %*% beta)
+set.seed(SEED)
 y <- rbinom(n = n_pop, size = 1, prob = p)
 df_pop <- data.frame(
   patient_id = paste0("patient-", 1:n_pop),
@@ -53,7 +55,7 @@ round(mean(between(df_pop[df_pop$y == 1, "p"], 0, 0.3))*100,2) # 20% of cases ha
 
 ## cross-sectional ----
 n_sample <- 2e4
-df_sample_cs <- sample_cross_sectional(df = df_pop, n = n_sample)
+df_sample_cs <- sample_cross_sectional(df = df_pop, n = n_sample, .seed = SEED)
 .title <- paste0(
   "best possible AUC with this sample ", get_auc(df_sample_cs$y, df_sample_cs$p)
 )
@@ -82,7 +84,8 @@ ggsave("output/report/sample-cc-mechanism-risk-distribution.png",
 ### sample ----
 cc_cutoffs <- c(0.3, 0.7)
 df_sample_cc <- sample_case_control(df = df_pop, n = n_sample, 
-                                    cutoffs = cc_cutoffs)
+                                    cutoffs = cc_cutoffs,
+                                    .seed = SEED)
 .title <- paste0(
   "best possible AUC with this sample ", get_auc(df_sample_cc$y, df_sample_cc$p)
 )
@@ -109,6 +112,43 @@ auc_cc <- get_auc_from_fit(fit_cc)
 cat("\nEstimated coeffs: ", exp(coef(fit_cc)[-1]),
     "\nEstimated AUC  (internal validation): ", auc_cc)
 
+## Cross-validation ----
+
+### CS model ----
+folds_cs <- caret::createFolds(df_sample_cs$y, k = 10)
+cv_cs_model <- map_df(folds_cs, ~{
+  fold_testing <- df_sample_cs[.x, ]
+  fold_training <- df_sample_cs[!(df_sample_cs$patient_id %in% fold_testing$patient_id), ]
+  fold_fit <- lrm(y ~ x1 + x2 + x3, data = fold_training, x = TRUE, y = TRUE)
+  fold_p_hat <- predict(fold_fit, newdata = fold_testing, type = "fitted")
+  .roc <- pROC::roc(fold_testing$y, fold_p_hat)
+  tibble(
+    auc = .roc$auc[1],
+    sens = .roc$sensitivities,
+    spec = .roc$specificities
+  )
+}, .id = 'fold_id')
+
+### CC model ----
+folds_cc <- caret::createFolds(df_sample_cc$y, k = 10)
+cv_cc_model <- map_df(folds_cc, ~{
+  fold_testing <- df_sample_cc[.x, ]
+  fold_training <- df_sample_cc[!(df_sample_cc$patient_id %in% fold_testing$patient_id), ]
+  fold_fit <- lrm(y ~ x1 + x2 + x3, data = fold_training, x = TRUE, y = TRUE)
+  fold_p_hat <- predict(fold_fit, newdata = fold_testing, type = "fitted")
+  .roc <- pROC::roc(fold_testing$y, fold_p_hat)
+  tibble(
+    auc = .roc$auc[1],
+    sens = .roc$sensitivities,
+    spec = .roc$specificities
+  )
+}, .id = 'fold_id')
+
+data.frame(cs = cv_cs_model,
+           cc = cv_cc_model) %>% 
+  pivot_longer(cols = everything()) %>% 
+  ggplot(aes(name, value)) + 
+  geom_point()
 ## External validation ----
 
 development_patients <- c(
