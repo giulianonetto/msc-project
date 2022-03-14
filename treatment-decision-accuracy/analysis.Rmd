@@ -145,7 +145,7 @@ How can we capture the spread around the calibration curve? Like a "predictive i
 # What if we re-fit the model in the validation data and use its predictions as "observed proportions"? (instead of using the calibration p)
 
 ```{r}
-n_test <- 1e3
+n_test <- 5000
 .df <- df[sample(1:n_pop, n_test), ]
 .df$p_hat1 <- m1(.df)
 .df$lp1 <- logit(.df$p_hat1)
