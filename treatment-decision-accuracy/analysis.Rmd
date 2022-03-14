@@ -1,0 +1,179 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+# Simulate population
+
+```{r}
+n_pop <- 1e6
+X <- cbind(
+  1,
+  rnorm(n_pop), rnorm(n_pop), rnorm(n_pop)
+)
+beta <- c(-1.5, log(1.5), log(0.1), log(3))
+p <- plogis(X %*% beta)
+y <- rbinom(n = n_pop, size = 1, prob = p)
+df <- data.frame(y, X[, -1], p)
+```
+
+# Define "fitted" models
+
+Two models: one perfect and one a little bit overfit.
+
+```{r}
+m1 <- \(x) as.vector(
+  plogis(
+    as.matrix(cbind(1, x[, stringr::str_detect(colnames(x), "^X")])) %*% beta
+  )
+)
+m2 <- \(x) as.vector(
+  plogis(
+    as.matrix(cbind(1, x[, stringr::str_detect(colnames(x), "^X")])) %*% c(-2.8, log(2), log(0.005), log(5))
+  )
+)
+```
+
+# calibration curves
+
+```{r}
+ix <- sample(1:n_pop, 1e5)
+.df <- df[ix,]
+logit <- \(x) log(x/(1-x))
+.df$p_hat1 <- m1(.df)
+.df$lp1 <- logit(.df$p_hat1)
+.df$p_hat2 <- m2(.df)
+.df$lp2 <- logit(.df$p_hat2)
+
+cal1 <- glm(y ~ rms::rcs(lp1, 5), data = .df, family = binomial)
+cal2 <- glm(y ~ rms::rcs(lp2, 5), data = .df, family = binomial)
+
+.df$cal1_fitted <- predict(cal1, data = .df, type = "response")
+.df$cal2_fitted <- predict(cal2, data = .df, type = "response")
+```
+
+# Treatment errors for each threshold
+
+```{r}
+
+
+library(tidyverse)
+thresholds <- seq(0.02, 0.5, 0.02)
+get_treatment_errors <- function(thr, df_val) {
+  tibble(
+    type = c(
+      "P(p > t | p_hat < t)",
+      "P(p < t | p_hat > t)",
+      "P(p > t | p_hat < t)",
+      "P(p < t | p_hat > t)"
+    ),
+    ref_type = c(
+      "underlying p",
+      "underlying p",
+      "calibration",
+      "calibration"
+    ),
+    type_label = c(
+      "undertreatment",
+      "overtreatment",
+      "undertreatment",
+      "overtreatment"
+    ),
+    model1 = c(
+      mean(df_val$p[df_val$p_hat1 < thr] > thr),
+      mean(df_val$p[df_val$p_hat1 > thr] < thr),
+      mean(df_val$cal1_fitted[df_val$p_hat1 < thr] > thr),
+      mean(df_val$cal1_fitted[df_val$p_hat1 > thr] < thr)
+    ),
+    model2 = c(
+      mean(df_val$p[df_val$p_hat2 < thr] > thr),
+      mean(df_val$p[df_val$p_hat2 > thr] < thr),
+      mean(df_val$cal2_fitted[df_val$p_hat2 < thr] > thr),
+      mean(df_val$cal2_fitted[df_val$p_hat2 > thr] < thr)
+    ),
+    thr = rep(thr, 4)
+  )
+}
+d <- map_df(thresholds, get_treatment_errors, df_val = .df)
+
+```
+
+# plot
+
+```{r}
+theme_set(theme_minimal())
+d %>% 
+  na.omit() %>% 
+  pivot_longer(cols = contains('model')) %>% 
+  ggplot(aes(thr, value, color = name, shape = ref_type, size = ref_type)) +
+  geom_point() +
+  facet_wrap(~type) +
+  scale_shape_manual(values = c(19, 21)) +
+  scale_size_manual(values = c(1, 3)) +
+  scale_x_continuous(labels = scales::percent) +
+  scale_y_continuous(labels = scales::percent,
+                     breaks = scales::pretty_breaks(10)) +
+  labs(x = "Decision threshold", y = NULL)
+
+```
+
+
+# possible reason
+
+Blue dots are the calibration estimates, gray dots are the true underlying probabilities. 
+
+```{r}
+.df %>% 
+  sample_n(2e4) %>% 
+  ggplot(aes(p_hat2)) +
+  geom_point(aes(y = p), alpha = 0.3) +
+  geom_point(aes(y = cal2_fitted), color = "blue") +
+  geom_abline(linetype = 2, color = "red", size = 2) +
+  labs(x = "Predicted probability (model 2)",
+       y = "Underlyng p or calibration p")
+
+```
+
+How can we capture the spread around the calibration curve? Like a "predictive interval for calibration p".
+
+* overdispersion? Like in beta-binomial regression
+* function of explained variability
+
+
+# What if we re-fit the model in the validation data and use its predictions as "observed proportions"? (instead of using the calibration p)
+
+```{r}
+n_test <- 1e3
+.df <- df[sample(1:n_pop, n_test), ]
+.df$p_hat1 <- m1(.df)
+.df$lp1 <- logit(.df$p_hat1)
+.df$p_hat2 <- m2(.df)
+.df$lp2 <- logit(.df$p_hat2)
+test_fit <- glm(y ~ X1 + X2 + X3, data = .df, family = binomial)
+.df$cal1_fitted <- predict(test_fit, type = 'response')
+.df$cal2_fitted <- predict(test_fit, type = 'response')
+d <- map_df(thresholds, get_treatment_errors, df_val = .df) %>% 
+  mutate(
+    ref_type = ifelse(
+      ref_type == "calibration",
+      "test fit",
+      ref_type
+    )
+  )
+
+d %>% 
+  na.omit() %>% 
+  pivot_longer(cols = contains('model')) %>% 
+  ggplot(aes(thr, value, color = name, shape = ref_type, size = ref_type)) +
+  geom_point() +
+  facet_wrap(~type) +
+  scale_shape_manual(values = c(19, 21)) +
+  scale_size_manual(values = c(1, 3)) +
+  scale_x_continuous(labels = scales::percent) +
+  scale_y_continuous(labels = scales::percent,
+                     breaks = scales::pretty_breaks(10)) +
+  labs(x = "Decision threshold", y = NULL)
+```
+
