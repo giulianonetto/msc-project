@@ -1,9 +1,19 @@
 ---
 title: "R Notebook"
-output: html_notebook
+output: html_document
 editor_options: 
   chunk_output_type: console
 ---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  dpi = 300
+)
+```
+
 
 # Simulate population
 
@@ -17,11 +27,14 @@ beta <- c(-1.5, log(1.5), log(0.1), log(3))
 p <- plogis(X %*% beta)
 y <- rbinom(n = n_pop, size = 1, prob = p)
 df <- data.frame(y, X[, -1], p)
+head(df)
 ```
 
 # Define "fitted" models
 
 Two models: one perfect and one a little bit overfit.
+
+## M1: perfect model
 
 ```{r}
 m1 <- \(x) as.vector(
@@ -29,9 +42,15 @@ m1 <- \(x) as.vector(
     as.matrix(cbind(1, x[, stringr::str_detect(colnames(x), "^X")])) %*% beta
   )
 )
+```
+
+## M2: not so great model
+
+```{r}
+beta2 <- c(-2.8, log(2), log(0.005), log(5))
 m2 <- \(x) as.vector(
   plogis(
-    as.matrix(cbind(1, x[, stringr::str_detect(colnames(x), "^X")])) %*% c(-2.8, log(2), log(0.005), log(5))
+    as.matrix(cbind(1, x[, stringr::str_detect(colnames(x), "^X")])) %*% beta2
   )
 )
 ```
@@ -55,6 +74,17 @@ cal2 <- glm(y ~ rms::rcs(lp2, 5), data = .df, family = binomial)
 ```
 
 # Treatment errors for each threshold
+
+For each threshold $t$, a treatment error occurs when $\hat{p}$ is on the wrong side of $t$, i.e.
+
+$$
+\begin{align}
+&p < t \text{ | } \hat{p} > t \implies \text{overtreatment} \\
+&p > t \text{ | } \hat{p} < t \implies \text{undertreatment}
+\end{align}
+$$
+
+We will compute the probability of each event for models M1 and M2, using both the true underlying probability $p$ and the calibration estimate $\tilde{p} = \Pr(Y=1 | \hat{p} = x) \ , \text{ for }  x \in (0,1)$.
 
 ```{r}
 
@@ -102,7 +132,9 @@ d <- map_df(thresholds, get_treatment_errors, df_val = .df)
 
 # plot
 
-```{r}
+Plot everything to see if calibration $\tilde{p}$ gives a nice (consistent) estimate of the over-/under-treatment probabilities.
+
+```{r fig.width=10, fig.height=5}
 theme_set(theme_minimal())
 d %>% 
   na.omit() %>% 
@@ -119,12 +151,22 @@ d %>%
 
 ```
 
+Apparently
+
+$$
+\Pr(p < t \text{ | } \hat{p} > t) \not\approx  \Pr(\tilde{p} < t \text{ | } \hat{p} > t)
+$$
+If we expand the expression for the different $p$'s, the math gets a bit confusing (conditional probability of conditional probabilities).
 
 # possible reason
 
-Blue dots are the calibration estimates, gray dots are the true underlying probabilities. 
+Calibration looks at $\hat{p}$, which hopefully approximates $p$, but $\hat{p}$ could be arbitrarily off (e.g. case-mix variation). 
 
-```{r}
+
+* Blue: "calibration" p - $\tilde{p}$ versus prediction $\hat{p}$
+* Black: true underlying p versus prediction $\hat{p}$
+
+```{r fig.width=10, fig.height=5}
 .df %>% 
   sample_n(2e4) %>% 
   ggplot(aes(p_hat2)) +
@@ -138,14 +180,14 @@ Blue dots are the calibration estimates, gray dots are the true underlying proba
 
 How can we capture the spread around the calibration curve? Like a "predictive interval for calibration p".
 
-* overdispersion? Like in beta-binomial regression
-* function of explained variability
+* overdispersion? Tried beta-binomial regression for calibration, didn't help
+* function of explained variability of $p$ by $\hat{p}$?
 
 
 # What if we re-fit the model in the validation data and use its predictions as "observed proportions"? (instead of using the calibration p)
 
-```{r}
-n_test <- 5000
+```{r fig.width=10, fig.height=5}
+n_test <- 1e5
 .df <- df[sample(1:n_pop, n_test), ]
 .df$p_hat1 <- m1(.df)
 .df$lp1 <- logit(.df$p_hat1)
@@ -177,3 +219,26 @@ d %>%
   labs(x = "Decision threshold", y = NULL)
 ```
 
+
+* Assumes I have a large enough external validation sample to fit this model
+* Feels a lot like model revision (re-train model): 
+
+> the data set needed to estimate over-/under-treatment probabilities must be large enough for us to get a second estimate $\hat{p_2} = \Pr(Y_{\text{test}} = 1 | X_{\text{test}})$, which is analogous to training another model on the test set (a bit like model revision).
+
+# Predicted versus calibration/underlying p
+
+* Blue: "calibration" p - $\hat{p_2}$ versus prediction $\hat{p}$
+* Black: true underlying p versus prediction $\hat{p}$
+ 
+```{r fig.width=10, fig.height=5}
+.df %>% 
+  sample_n(2e4) %>% 
+  ggplot(aes(p_hat2)) +
+  geom_point(aes(y = p), alpha = 0.8) +
+  geom_point(aes(y = cal2_fitted), alpha = 0.5, color = "blue", 
+             shape = 21, size = 2) +
+  geom_abline(linetype = 2, color = "red", size = 2) +
+  labs(x = "Predicted probability (model 2)",
+       y = "Underlyng p or calibration p")
+
+```
