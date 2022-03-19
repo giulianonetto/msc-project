@@ -93,6 +93,99 @@ df_sample_cc <- sample_case_control(df = df_pop, n = n_sample,
 ggsave("output/report/sample-cc-risk-distribution.png", 
        .p, width = 10, height = 4)
 
+## Group differences ----
+
+get_avg_diff <- function(.data) {
+  .data %>% 
+    pivot_longer(contains('x')) %>% 
+    group_by(name = str_replace(name, "x", "Predictor ")) %>% 
+    group_modify(~broom::tidy(lm(value ~ y, data = .x), conf.int=T)) %>% 
+    filter(term == "y") %>% 
+    select(name, estimate, conf.low, conf.high) %>% 
+    mutate(
+      label = paste0(
+        "Avg. diff.\n",
+        round(estimate, 2),
+        " [",
+        round(conf.low, 2),
+        " \u2012 ",
+        round(conf.high, 2),
+        "]"
+      )
+    )
+}
+
+gdiff_pop <- df_pop %>% 
+  pivot_longer(cols = contains('x')) %>% 
+  mutate(name = str_replace(name, "x", "Predictor "),
+         y = paste0("Y = ", y)) %>% 
+  ggplot(aes(x = value, group=y, fill = y)) +
+  geom_density(alpha = .7) +
+  facet_wrap(~name, ncol=3) +
+  geom_text(
+    data = get_avg_diff(df_pop),
+    aes(x = 5.5, y = 0.3, label = label),
+    inherit.aes = F
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(strip.text = element_text(size = 18, face = 'bold'),
+        plot.title.position = "plot",
+        plot.title = element_text(size = 14, face = 'bold')) +
+  scale_fill_brewer(type = 'qual', palette = 2) +
+  labs(x = NULL, fill = NULL, y = "density",
+       title = "Population") +
+  guides(fill = 'none') +
+  coord_cartesian(xlim = c(-9, 9))
+
+gdiff_cs <- df_sample_cs %>% 
+  pivot_longer(cols = contains('x')) %>% 
+  mutate(name = str_replace(name, "x", "Predictor "),
+         y = paste0("Y = ", y)) %>% 
+  ggplot(aes(x = value, group=y, fill = y)) +
+  geom_density(alpha = .7) +
+  geom_text(
+    data = get_avg_diff(df_sample_cs),
+    aes(x = 5.5, y = 0.3, label = label),
+    inherit.aes = F
+  ) +
+  facet_wrap(~name, ncol=3) +
+  theme_minimal(base_size = 12) +
+  theme(strip.text = element_blank(),
+        plot.title.position = "plot",
+        plot.title = element_text(size = 14, face = 'bold')) +
+  scale_fill_brewer(type = 'qual', palette = 2) +
+  labs(x = NULL, fill = NULL, y = "density",
+       title = 'Cross-sectional sample') +
+  coord_cartesian(xlim = c(-9, 9))
+
+gdiff_cc <- df_sample_cc %>% 
+  pivot_longer(cols = contains('x')) %>% 
+  mutate(name = str_replace(name, "x", "Predictor "),
+         y = paste0("Y = ", y)) %>% 
+  ggplot(aes(x = value, group=y, fill = y)) +
+  geom_density(alpha = .7) +
+  geom_text(
+    data = get_avg_diff(df_sample_cc),
+    aes(x = 5.5, y = 0.3, label = label),
+    inherit.aes = F
+  ) +
+  facet_wrap(~name, ncol=3) +
+  theme_minimal(base_size = 12) +
+  theme(strip.text = element_blank(),
+        plot.title.position = "plot",
+        plot.title = element_text(size = 14, face = 'bold')) +
+  scale_fill_brewer(type = 'qual', palette = 2) +
+  labs(x = NULL, fill = NULL, y = "density",
+       title = 'Case-control sample') +
+  guides(fill = 'none') +
+  coord_cartesian(xlim = c(-9, 9))
+
+
+.p <- gdiff_pop/gdiff_cs/gdiff_cc 
+
+ggsave("output/report/group-differences.png", 
+       .p, width = 14, height = 10)
+
 # Fit models ----
 
 ## CS sample ----
@@ -144,11 +237,30 @@ cv_cc_model <- map_df(folds_cc, ~{
   )
 }, .id = 'fold_id')
 
-data.frame(cs = cv_cs_model,
-           cc = cv_cc_model) %>% 
-  pivot_longer(cols = everything()) %>% 
-  ggplot(aes(name, value)) + 
-  geom_point()
+cv_roc <- bind_rows(
+  cv_cc_model %>% mutate(model = "CC model"),
+  cv_cs_model %>% mutate(model = "CS model")
+) %>% 
+  ggplot(aes(1-spec, sens, group = fold_id)) +
+  geom_line(alpha = 0.4) +
+  geom_text(
+    data = . %>% 
+      group_by(model) %>% 
+      summarise(
+        m = mean(auc)
+      ) %>% 
+      mutate(
+        .text = paste0(
+          "AUC ", round(m,3)
+        )
+      ),
+    aes(label = .text, x = .5, y=.3), inherit.aes = F
+  ) +
+  facet_wrap(~model) +
+  labs(x = "1 - Specificity",
+       y = "Sensitivity")
+ggsave("output/report/cv_roc.png",
+       cv_roc, width = 10, height = 4)
 ## External validation ----
 
 development_patients <- c(
