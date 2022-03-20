@@ -95,7 +95,7 @@ ggsave("output/report/sample-cc-risk-distribution.png",
 
 ## Group differences ----
 
-get_avg_diff <- function(.data) {
+get_avg_diff <- function(.data, conf.int = TRUE) {
   .data %>% 
     pivot_longer(contains('x')) %>% 
     group_by(name = str_replace(name, "x", "Predictor ")) %>% 
@@ -103,14 +103,21 @@ get_avg_diff <- function(.data) {
     filter(term == "y") %>% 
     select(name, estimate, conf.low, conf.high) %>% 
     mutate(
-      label = paste0(
-        "Avg. diff.\n",
-        round(estimate, 2),
-        " [",
-        round(conf.low, 2),
-        " \u2012 ",
-        round(conf.high, 2),
-        "]"
+      label = ifelse(
+        isTRUE(conf.int),
+        paste0(
+          "Avg. diff.\n",
+          round(estimate, 2),
+          " [",
+          round(conf.low, 2),
+          " \u2012 ",
+          round(conf.high, 2),
+          "]"
+        ),
+        paste0(
+          "Avg. diff.\n",
+          round(estimate, 2)
+        )
       )
     )
 }
@@ -123,7 +130,7 @@ gdiff_pop <- df_pop %>%
   geom_density(alpha = .7) +
   facet_wrap(~name, ncol=3) +
   geom_text(
-    data = get_avg_diff(df_pop),
+    data = get_avg_diff(df_pop, conf.int = FALSE),
     aes(x = 5.5, y = 0.3, label = label),
     inherit.aes = F
   ) +
