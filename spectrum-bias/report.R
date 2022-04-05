@@ -278,28 +278,166 @@ n_val <- 20000
 df_val_cs <- sample_cross_sectional(
   df = df_pop %>% 
     filter(!(patient_id %in% development_patients)),
-  n = n_val
+  n = n_val,
+  .seed = SEED
 )
 df_val_cc <- sample_case_control(
   df = df_pop %>% 
     filter(!(patient_id %in% development_patients)),
   n = n_val,
-  cutoffs = cc_cutoffs
+  cutoffs = cc_cutoffs,
+  .seed = SEED
 )
 
 ### CC external data ----
 
+#### AUC/ROC ----
+
 p_hat_cs <- predict(fit_cs, newdata = df_val_cc, type = "fitted")
 p_hat_cc <- predict(fit_cc, newdata = df_val_cc, type = "fitted")
-auc_cs <- get_auc(df_val_cc$y, p_hat_cs)
-auc_cc <- get_auc(df_val_cc$y, p_hat_cc)
+(auc_cs <- get_auc(df_val_cc$y, p_hat_cs))
+(auc_cc <- get_auc(df_val_cc$y, p_hat_cc))
+
+.roc_cc <- pROC::roc(df_val_cc$y, p_hat_cc)
+.roc_cs <- pROC::roc(df_val_cc$y, p_hat_cs)
+.p <- tibble(
+  sens = c(
+    .roc_cc$sensitivities,
+    .roc_cs$sensitivities
+  ),
+  spec = c(
+    .roc_cc$specificities,
+    .roc_cs$specificities
+  ),
+  model = rep(c("CC model", "CS model"),
+              each = length(.roc_cc$specificities))
+) %>% 
+  ggplot(aes(1-spec, sens, group = model)) +
+  geom_line() +
+  geom_text(
+    data = tibble(
+      model = c("CC model", "CS model"),
+      .auc = c(.roc_cc$auc[1], .roc_cs$auc[1]) %>% 
+        round(3),
+      .text = paste0("AUC ", .auc)
+    ),
+    aes(label = .text, x = .5, y=.3), inherit.aes = F
+  ) +
+  theme_bw() +
+  facet_wrap(~model) +
+  labs(x = "1 - Specificity",
+       y = "Sensitivity",
+       title = "Case-control test set")
+ggsave("output/report/test_set_roc_cc.png",
+       .p, width = 10, height = 4)
+
+#### Calibration ----
+
+png("output/report/calibration-cc-data.png",
+    res = 300, width = 3600, height = 1600)
+par(mfrow = c(1, 2))
+cal_cc <- val.prob(y = df_val_cc$y, p = p_hat_cc,
+                   ylab = "Observed probabilities",
+                   smooth = F, statloc = F)
+title(main = 'CC model')
+cal_cs <- val.prob(y = df_val_cc$y, p = p_hat_cs,
+                   ylab = "Observed probabilities",
+                   smooth = F, statloc = F)
+title(main = 'CS model')
+dev.off()
+
+#### True probs ----
+
+png("output/report/calibration-cc-data-true-probs.png",
+    res = 300, width = 3600, height = 1600)
+par(mfrow = c(1, 2))
+plot(p_hat_cc, df_val_cc$p,
+     xlab = "Predicted probabilities",
+     ylab = "True underlying probabilities",
+     main = "CC model")
+abline(0, 1, lty = 2, col = "red", lwd = 2)
+plot(p_hat_cs, df_val_cc$p,
+     xlab = "Predicted probabilities",
+     ylab = "True underlying probabilities",
+     main = "CS model")
+abline(0, 1, lty = 2, col = "red", lwd = 2)
+dev.off()
 
 ### CS external data ----
 
+#### AUC/ROC ----
+
 p_hat_cs <- predict(fit_cs, newdata = df_val_cs, type = "fitted")
 p_hat_cc <- predict(fit_cc, newdata = df_val_cs, type = "fitted")
-auc_cs <- get_auc(df_val_cs$y, p_hat_cs)
-auc_cc <- get_auc(df_val_cs$y, p_hat_cc)
+(auc_cs <- get_auc(df_val_cs$y, p_hat_cs))
+(auc_cc <- get_auc(df_val_cs$y, p_hat_cc))
+
+.roc_cc <- pROC::roc(df_val_cs$y, p_hat_cc)
+.roc_cs <- pROC::roc(df_val_cs$y, p_hat_cs)
+.p <- tibble(
+  sens = c(
+    .roc_cc$sensitivities,
+    .roc_cs$sensitivities
+  ),
+  spec = c(
+    .roc_cc$specificities,
+    .roc_cs$specificities
+  ),
+  model = rep(c("CC model", "CS model"),
+              each = length(.roc_cc$specificities))
+) %>% 
+  ggplot(aes(1-spec, sens, group = model)) +
+  geom_line() +
+  geom_text(
+    data = tibble(
+      model = c("CC model", "CS model"),
+      .auc = c(.roc_cc$auc[1], .roc_cs$auc[1]) %>% 
+        round(3),
+      .text = paste0("AUC ", .auc)
+    ),
+    aes(label = .text, x = .5, y=.3), inherit.aes = F
+  ) +
+  theme_bw() +
+  facet_wrap(~model) +
+  labs(x = "1 - Specificity",
+       y = "Sensitivity",
+       title = "Cross-sectional test set")
+ggsave("output/report/test_set_roc_cs.png",
+       .p, width = 10, height = 4)
+
+#### Calibration ----
+
+png("output/report/calibration-cs-data.png",
+    res = 300, width = 3600, height = 1600)
+par(mfrow = c(1, 2))
+cal_cc <- val.prob(y = df_val_cs$y, p = p_hat_cc,
+                   ylab = "Observed probabilities",
+                   smooth = F, statloc = F)
+title(main = 'CC model')
+cal_cs <- val.prob(y = df_val_cs$y, p = p_hat_cs,
+                   ylab = "Observed probabilities",
+                   smooth = F, statloc = F)
+title(main = 'CS model')
+dev.off()
+
+#### True probs ----
+
+## True probs
+
+png("output/report/calibration-cs-data-true-probs.png",
+    res = 300, width = 3600, height = 1600)
+par(mfrow = c(1, 2))
+plot(p_hat_cs, df_val_cs$p,
+     xlab = "Predicted probabilities",
+     ylab = "True probabilities",
+     main = "CS model")
+abline(0, 1, lty = 2, col = "red", lwd = 2)
+plot(p_hat_cc, df_val_cs$p,
+     xlab = "Predicted probabilities",
+     ylab = "True probabilities",
+     main = "CC model")
+abline(0, 1, lty = 2, col = "red", lwd = 2)
+dev.off()
 
 #### mROC ----
 
@@ -327,35 +465,7 @@ auc_cc <- get_auc(df_val_cs$y, p_hat_cc)
   dev.off()
 }
 
-## Calibration ----
 
-png("output/report/calibration-cs-data.png",
-    res = 300, width = 3600, height = 1600)
-par(mfrow = c(1, 2))
-cal_cs <- val.prob(y = df_val_cs$y, p = p_hat_cs,
-                   ylab = "Observed probabilities")
-title(main = 'CS model')
-cal_cc <- val.prob(y = df_val_cs$y, p = p_hat_cc,
-                   ylab = "Observed probabilities")
-title(main = 'CC model')
-dev.off()
-
-## True probs
-
-png("output/report/calibration-cs-data-true-probs.png",
-    res = 300, width = 3600, height = 1600)
-par(mfrow = c(1, 2))
-plot(p_hat_cs, df_val_cs$p,
-     xlab = "Predicted probabilities",
-     ylab = "True probabilities",
-     main = "CS model")
-abline(0, 1, lty = 2, col = "red", lwd = 2)
-plot(p_hat_cc, df_val_cs$p,
-     xlab = "Predicted probabilities",
-     ylab = "True probabilities",
-     main = "CC model")
-abline(0, 1, lty = 2, col = "red", lwd = 2)
-dev.off()
 
 ## Distribution of predictions
 
@@ -385,7 +495,7 @@ pROC::plot.roc(df_val_cs$y, p_hat_cs, main = "CS model")
 pROC::plot.roc(df_val_cs$y, p_hat_cc, main = "CC model")
 dev.off()
 
-# Tyranny of classifiers
+# Tyranny of classifiers ----
 
 x0 <- p_hat_cc[near(df_val_cs$p, .2, 1e-4)][1]
 png("output/report/tyranny-of-classifiers.png",
@@ -415,7 +525,7 @@ segments(
 text(x0, 0.315, str_glue("({round(x0, 3)}, 0.20)"))
 dev.off()
 
-# How many people like John Doe ---
+## How many people like John Doe ----
 df_val_cs$p_cc <- p_hat_cc
 df_val_cs$p_cs <- p_hat_cs
 
@@ -458,7 +568,7 @@ should_have_proportion <- round(100*mean(df_val_cs$p[df_val_cs$p_cc < 0.1] > 0.1
 ggsave("output/report/how-many-people-like-john-doe.png", 
        .p, width = 7, height = 4, dpi = 600)
 
-# Decision consequences
+## Decision consequences ----
 
 
 thresholds <- seq(0.01, 0.5, 0.01)
@@ -541,7 +651,7 @@ undertreat_at_t10 <- df_undertreat %>%
 ggsave("output/report/how-many-john-does.png", 
        .p, width = 7, height = 4, dpi = 600)
 
-## undertreat and sick
+## undertreat and sick ----
 
 df_undertreat_sick <- df_consequences %>% 
   filter(name == "undertreat_sick")

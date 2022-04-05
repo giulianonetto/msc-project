@@ -1,0 +1,185 @@
+---
+title: "R Notebook"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  dpi = 300
+)
+```
+
+
+# Simulate population
+
+```{r}
+library(tidyverse)
+library(brms)
+# cmdstanr::install_cmdstan()
+n_pop <- 1e6
+set.seed(123)
+X <- cbind(
+  1,
+  rnorm(n_pop), rnorm(n_pop), rnorm(n_pop)
+)
+beta <- c(-1.5, log(1.5), log(0.1), log(3))
+p <- plogis(X %*% beta)
+set.seed(123)
+y <- rbinom(n = n_pop, size = 1, prob = p)
+df <- data.frame(y, X[, -1], p)
+head(df)
+```
+
+# Define "fitted" models
+
+Two models: one perfect and one a little bit overfit.
+
+## M1: perfect model
+
+```{r}
+m1 <- \(x) as.vector(
+  plogis(
+    as.matrix(cbind(1, x[, stringr::str_detect(colnames(x), "^X")])) %*% beta
+  )
+)
+```
+
+## M2: not so great model
+
+```{r}
+beta2 <- c(-2.8, log(2), log(0.005), log(5))
+m2 <- \(x) as.vector(
+  plogis(
+    as.matrix(cbind(1, x[, stringr::str_detect(colnames(x), "^X")])) %*% beta2
+  )
+)
+```
+
+
+# Bayesian test set calibration
+
+```{r}
+
+logit <- \(p) log(p/(1-p))
+get_test_set <- function(pop_data, n_test = 1e3) {
+  .df <- pop_data[sample(1:nrow(pop_data), min(n_test, nrow(pop_data))), ]
+  .df$p_hat1 <- m1(.df)
+  .df$lp1 <- logit(.df$p_hat1)
+  .df$p_hat2 <- m2(.df)
+  .df$lp2 <- logit(.df$p_hat2)
+  return(.df)
+}
+
+df$p_hat1 <- m1(df)
+df$lp1 <- logit(df$p_hat1)
+df$p_hat2 <- m2(df)
+df$lp2 <- logit(df$p_hat2)
+```
+
+## Undertreatment in model 2
+
+Assume threshold `thr = 10%`, let's see how we estimate $\Pr[\tilde{p} > t \ | \ \hat{p} < t]$
+
+```{r}
+
+betareg_placeholder <- brm(
+  bf(wrong_side_prob ~ 1,
+     phi ~ 1, zoi ~ 1, coi ~ 1),
+  data = data.frame(wrong_side_prob = 0),
+  family = zero_one_inflated_beta(),
+  chains = 3,
+  cores = 3,
+  refresh = 0
+)
+
+set.seed(123)
+test_folds <- caret::createFolds(1:n_pop, k = 100)
+res_all <- imap(test_folds, function(.fold, fold_name) {
+  fold_file <- str_glue("output/res_{fold_name}.tsv")
+  if (file.exists(fold_file)) {
+    res <- read_tsv(fold_file, show_col_types = F)
+    return(res)
+  }
+  print(str_glue("\n\nFitting for {fold_name}\n"))
+  df_test <- get_test_set(pop_data = df[.fold,], n_test = 500)
+  test_fit <- brm(y ~ X1 + X2 + X3, data = df_test, family = bernoulli,
+                  chains = 3, cores = 3, backend = 'cmdstanr',
+                  refresh = 0)
+  test_draws <- tidybayes::add_epred_draws(df_test, test_fit, ndraws = 20)
+  
+  thr_vec <- c(.01, .05, .1, .2, .5, .8, .9, .95, .99)
+  res <- map_df(thr_vec, function(.thr) {
+    test_draws_neg <- test_draws[test_draws$p_hat2 < .thr,] %>% 
+      summarise(wrong_side_prob = mean(.epred > .thr), .groups = "drop") %>% 
+      ungroup() %>% 
+      select(wrong_side_prob)
+    .test_fit_neg <- update(betareg_placeholder,
+                            newdata = test_draws_neg,
+                            chains = 3,
+                            cores = 3,
+                            refresh = 0)
+    true_value <- mean(df$p[df$p_hat2 < .thr] > .thr)
+    undertreat <- tidybayes::epred_draws(
+      .test_fit_neg, newdata = data.frame(threshold = .thr)
+    ) %>% 
+      tidybayes::median_qi() %>% 
+      select(threshold, .epred, .lower, .upper) %>% 
+      mutate(truth = true_value,
+             good_interval = truth >= .lower & truth <= .upper)
+    return(undertreat)
+  })
+  write_tsv(
+    res, fold_file
+  )
+  return(res)
+})
+
+res_summary <- res_all %>% 
+  bind_rows() %>% 
+  group_by(threshold, truth) %>% 
+  summarise(
+    avg_epred = mean(.epred),
+    coverage = mean(good_interval)
+  )
+
+write_tsv(res_summary, 'output/res_summary.tsv')
+theme_set(theme_bw())
+res_summary %>% 
+  ggplot(aes(avg_epred, truth)) +
+  geom_point() +
+  geom_abline()
+
+```
+
+```{r}
+.p <- res_all %>% 
+  bind_rows() %>% 
+  group_by(threshold) %>% 
+  mutate(r = row_number()) %>% 
+  ggplot(aes(r, .epred, ymax = .upper, ymin = .lower)) +
+  geom_pointrange() + 
+  geom_hline(
+    data = res_all$Fold001 %>% 
+      select(threshold, truth) %>% unique(),
+    aes(yintercept = truth),
+    color = 'red',
+    lty = 2, size = 2
+  ) +
+  facet_wrap(~threshold, scales = 'free_y') +
+  labs(
+    x = "Simulation index",
+    y = latex2exp::TeX("$\\Pr(\\tilde{p} > t \ | \ \\hat{p} < t)$"),
+    title = latex2exp::TeX(
+      "Prob. that we should have treated ($\\tilde{p} > t$) when we don't treat ($\\hat{p} < t$)"
+    )
+  )
+
+ggsave("output/undertreat_simulation.png",
+       .p, width = 14, height = 6.5)
+```
+

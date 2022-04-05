@@ -42,6 +42,9 @@ vignettes/*.pdf
 .config
 .local
 
+# cmdstanr
+.cmdstanr/
+
 # Job manager
 *.pbs
 
