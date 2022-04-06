@@ -427,15 +427,15 @@ dev.off()
 png("output/report/calibration-cs-data-true-probs.png",
     res = 300, width = 3600, height = 1600)
 par(mfrow = c(1, 2))
-plot(p_hat_cs, df_val_cs$p,
-     xlab = "Predicted probabilities",
-     ylab = "True probabilities",
-     main = "CS model")
-abline(0, 1, lty = 2, col = "red", lwd = 2)
 plot(p_hat_cc, df_val_cs$p,
      xlab = "Predicted probabilities",
      ylab = "True probabilities",
      main = "CC model")
+abline(0, 1, lty = 2, col = "red", lwd = 2)
+plot(p_hat_cs, df_val_cs$p,
+     xlab = "Predicted probabilities",
+     ylab = "True probabilities",
+     main = "CS model")
 abline(0, 1, lty = 2, col = "red", lwd = 2)
 dev.off()
 
