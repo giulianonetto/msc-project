@@ -57,7 +57,7 @@ round(mean(between(df_pop[df_pop$y == 1, "p"], 0, 0.3))*100,2) # 20% of cases ha
 n_sample <- 2e4
 df_sample_cs <- sample_cross_sectional(df = df_pop, n = n_sample, .seed = SEED)
 .title <- paste0(
-  "best possible AUC with this sample ", get_auc(df_sample_cs$y, df_sample_cs$p)
+  "max AUC ", get_auc(df_sample_cs$y, df_sample_cs$p)
 )
 .p <- plot_disease_prob(df = df_sample_cs, title = .title)
 ggsave("output/report/sample-cs-risk-distribution.png", 
@@ -87,7 +87,7 @@ df_sample_cc <- sample_case_control(df = df_pop, n = n_sample,
                                     cutoffs = cc_cutoffs,
                                     .seed = SEED)
 .title <- paste0(
-  "best possible AUC with this sample ", get_auc(df_sample_cc$y, df_sample_cc$p)
+  "max AUC ", get_auc(df_sample_cc$y, df_sample_cc$p)
 )
 .p <- plot_disease_prob(df = df_sample_cc, title = .title)
 ggsave("output/report/sample-cc-risk-distribution.png", 
@@ -465,8 +465,28 @@ dev.off()
   dev.off()
 }
 
+#### DCA ----
+library(dcurves)
+decision_curve_analisys <- dca(
+  y ~ CS_model + CC_model,
+  data = data.frame(
+    y = df_val_cs$y,
+    CS_model = p_hat_cs, 
+    CC_model = p_hat_cc
+  ), 
+  label = list(CS_model = "CS model", CC_model = "CC model")
+)
+.p <- decision_curve_analisys %>% 
+  plot(smooth = F) +
+  geom_vline(xintercept = .1, lty = 2, alpha = 0.75) +
+  geom_line(size = 1.5) +
+  labs(x = "Decision threshold")
 
+ggsave("output/report/dca-cs-data.png",
+       .p, width = 8.5, height = 4)
 
+decision_curve_analisys$dca %>% 
+  filter(threshold == 0.1)
 ## Distribution of predictions
 
 .p <- data.frame(
@@ -546,7 +566,7 @@ should_have_proportion <- round(100*mean(df_val_cs$p[df_val_cs$p_cc < 0.1] > 0.1
     'text',
     x = 0.16, y = 700,
     label = paste0(
-      "Not treated, but should have\n",
+      "Erroneously untreated\n",
       "(", should_have_proportion, "%)"
     ),
     color = "red",
@@ -561,9 +581,8 @@ should_have_proportion <- round(100*mean(df_val_cs$p[df_val_cs$p_cc < 0.1] > 0.1
     ),
     color = "black", lwd = 1.4, lty = 2
   ) +
-  labs(x = "True probability of clotting issues",
-       y = "Count",
-       subtitle = paste0("Even though the NPV P(Y = 0 | phat < t) is ", npv, "% ..."))
+  labs(x = latex2exp::TeX("True underlying probabilities"),
+       y = "Count")
 
 ggsave("output/report/how-many-people-like-john-doe.png", 
        .p, width = 7, height = 4, dpi = 600)
@@ -571,7 +590,7 @@ ggsave("output/report/how-many-people-like-john-doe.png",
 ## Decision consequences ----
 
 
-thresholds <- seq(0.01, 0.5, 0.01)
+thresholds <- seq(0.01, 0.99, 0.01)
 consequences_cc <- get_decision_consequences(
   df_val_cs,
   phat = "p_cc",
@@ -596,6 +615,10 @@ df_consequences <- bind_rows(consequences_cc,
       T ~ NA_character_
     )
   )
+
+### undertreatment ----
+
+
 df_undertreat <- df_consequences %>% 
   filter(name == "undertreat")
 
@@ -606,15 +629,16 @@ undertreat_at_t10 <- df_undertreat %>%
   ) %>% 
   filter(threshold == 0.1)
 
-.p <- df_undertreat %>% 
+.p_under <- df_undertreat %>% 
   ggplot(aes(threshold, value, color = estimator)) +
+  geom_line(lwd = 2, lty = 1) +
   geom_segment(
     aes(
       x = .1, xend = .1,
       y = 0,
       yend = undertreat_at_t10[['CC model']]
     ), 
-    color = "red", lwd = 1.1, lty = 3
+    color = "red", lwd = 1.1, lty = 2
   ) +
   geom_segment(
     aes(
@@ -623,35 +647,95 @@ undertreat_at_t10 <- df_undertreat %>%
       x = 0,
       xend = .1
     ), 
-    color = "red", lwd = 1.1, lty = 3
+    color = "red", lwd = 1.1, lty = 2
   ) +
   annotate(
-    'text', x = .3, y = .45,
+    'text', x = .6, y = .45,
     label = paste0(
       "Every 100 patients not treated using threshold of 10%,\nabout ",
       round(undertreat_at_t10[['CC model']]*100),
-      " actually should have been treated\n",
-      "(all of which can sue us)"
+      " actually should have been treated"
     ),
     color = "red",
     fontface = "bold",
-    size = 3
+    size = 3.5
   ) +
-  geom_line(lwd = 2, lty = 2) +
-  scale_y_continuous(labels = scales::percent) +
+  scale_y_continuous(labels = scales::percent,
+                     limits = c(0,1)) +
   scale_x_continuous(labels = scales::percent) +
   labs(
     # title = "Fail-to-treat probability",
-    title = "Percentage of people not treated who *should* have been treated",
-    subtitle = "P(true probability > t | prediction < t)",
-    x = "Threshold (t)", 
+    title = "Undertreatment probability",
+    x = "Decision threshold", 
     y = NULL,
     color = NULL
   )
 ggsave("output/report/how-many-john-does.png", 
-       .p, width = 7, height = 4, dpi = 600)
+       .p_under, width = 7.5, height = 4, dpi = 600)
 
-## undertreat and sick ----
+### Overtreatment ----
+
+
+df_overtreat <- df_consequences %>% 
+  filter(name == "overtreat")
+
+overtreat_at_t50 <- df_overtreat %>% 
+  pivot_wider(
+    names_from = estimator,
+    values_from = value
+  ) %>% 
+  filter(threshold == 0.5)
+
+.p_over <- df_overtreat %>% 
+  ggplot(aes(threshold, value, color = estimator)) +
+  geom_line(lwd = 2, lty = 1) +
+  geom_segment(
+    aes(
+      x = .5, xend = .5,
+      y = 0,
+      yend = overtreat_at_t50[['CC model']]
+    ), 
+    color = "red", lwd = 1.1, lty = 2
+  ) +
+  geom_segment(
+    aes(
+      y = overtreat_at_t50[['CC model']], 
+      yend = overtreat_at_t50[['CC model']],
+      x = 0,
+      xend = .5
+    ), 
+    color = "red", lwd = 1.1, lty = 2
+  ) +
+  annotate(
+    'text', x = .4, y = .65,
+    label = paste0(
+      "Every 100 patients treated using threshold of 50%,\nabout ",
+      round(overtreat_at_t50[['CC model']]*100),
+      " actually should not have been treated"
+    ),
+    color = "red",
+    fontface = "bold",
+    size = 3.5
+  ) +
+  scale_y_continuous(labels = scales::percent,
+                     limits = c(0,1)) +
+  scale_x_continuous(labels = scales::percent) +
+  labs(
+    # title = "Fail-to-treat probability",
+    title = "Overtreatment probability",
+    x = "Decision threshold", 
+    y = NULL,
+    color = NULL
+  )
+ggsave("output/report/overtreatment-probaility.png", 
+       .p_over, width = 7.5, height = 4, dpi = 600)
+
+
+.p <- (.p_under/.p_over) + plot_layout(guides = 'collect')
+ggsave("output/report/under-and-over-treatment-probaility.png", 
+       .p, width = 7.5, height = 8, dpi = 600)
+
+### undertreat and sick ----
 
 df_undertreat_sick <- df_consequences %>% 
   filter(name == "undertreat_sick")
