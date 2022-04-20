@@ -791,3 +791,70 @@ undertreat_sick_at_t10 <- df_undertreat_sick %>%
   )
 ggsave("output/report/how-many-john-does-sick.png", 
        .p, width = 7, height = 4, dpi = 600)
+
+# Recalibration ----
+
+df_val_cs$lp_cc <- logit(df_val_cs$p_cc) - coef(fit_cc)[1]
+set.seed(SEED)
+ix <- sample(1:nrow(df_val_cs), 1000)
+fit_recal <- glm(y ~ lp_cc, data = df_val_cs[ix,], family = binomial())
+
+fit_cc_updated <- fit_cc
+fit_cc_updated$coefficients[1] <- coef(fit_recal)[1]
+fit_cc_updated$coefficients[-1] <- coef(fit_recal)[2]*coef(fit_cc)[-1]
+df_val_cs$p_cc_updated <-  predict(fit_cc_updated, newdata = df_val_cs, 
+                                   type = "fitted")
+# AUC is unchanged
+pROC::auc(df_val_cs$y[-ix], df_val_cs$p_cc_updated[-ix])
+
+## True probs ----
+
+png("output/report/recalibration-cc-model-true-probs.png",
+    res = 300, width = 3600/2, height = 1600)
+plot(df_val_cs$p_cc_updated[-ix], df_val_cs$p[-ix],
+     xlab = "Predicted probabilities",
+     ylab = "True underlying probabilities",
+     main = "CC model updated")
+abline(0, 1, lty = 2, col = "red", lwd = 2)
+dev.off()
+
+## Undertreatment ----
+consequences_cc_updated <- get_decision_consequences(
+  df_val_cs[-ix,],
+  phat = "p_cc_updated",
+  .thresholds = thresholds
+)
+
+consequences_cc_updated %>% 
+  filter(threshold == 0.1) %>% 
+  select(contains('treat'))
+
+
+## DCA 2 ----
+
+decision_curve_analisys <- dca(
+  y ~ CS_model + CC_model_updated,
+  data = data.frame(
+    y = df_val_cs$y[-ix],
+    CS_model = p_hat_cs[-ix], 
+    CC_model_updated = p_hat_cc_updated
+  ), 
+  label = list(CS_model = "CS model", CC_model_updated = "CC model updated")
+)
+.p <- decision_curve_analisys %>% 
+  plot(smooth = F) +
+  geom_vline(xintercept = .1, lty = 2, alpha = 0.75) +
+  geom_line(size = 1.5, aes(linetype = label)) +
+  scale_linetype_manual(
+    values = c(
+      "Treat All" = 1,
+      "Treat None" = 1,
+      "CS model" = 1,
+      "CC model updated" = 2
+    )
+  ) +
+  labs(x = "Decision threshold") +
+  guides(linetype = "none")
+
+ggsave("output/report/recalibration-dca.png",
+       .p, width = 8.5, height = 4)
