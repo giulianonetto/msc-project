@@ -6,7 +6,7 @@ library(rms)
 library(rmda)
 library(pROC)
 #library(caret) # only createFolds function used
-theme_set(theme_bw(base_size = 14))
+theme_set(ggthemes::theme_base(base_size = 14))
 source("R/functions.R") 
 # create output dir for figures and stuff
 dir.create("output/manuscript", showWarnings = FALSE)
@@ -462,7 +462,7 @@ undertreat_at_t10
 
 .p_under <- df_undertreat %>% 
   ggplot(aes(threshold, value, color = estimator)) +
-  geom_line(lwd = 2, lty = 1) +
+  geom_line(lwd = 2, aes(linetype = estimator)) +
   scale_y_continuous(labels = scales::percent,
                      limits = c(0,1)) +
   scale_x_continuous(labels = scales::percent) +
@@ -471,17 +471,24 @@ undertreat_at_t10
     y = "Undertreatment  probability",
     color = NULL
   ) +
+  ggthemes::theme_base(base_size = 14) +
   theme(
-    legend.position = c(0.7, 0.8)
+    legend.position = c(0.6, 0.8),
+    plot.background = element_blank()
   ) +
-  scale_color_discrete(
+  scale_color_manual(
+    values = c(
+      "CS model" = "#74cbe2",
+      "CC model" = "#ff1616"
+    ),
     label = list(
       "CC model" = "Model trained on case-control data",
       "CS model" = "Model trained on cross-sectional data"
     )
-  )
+  ) +
+  guides(linetype = 'none')
 ggsave("output/manuscript/undertreatment-probability.png", 
-       .p_under, width = 7.5, height = 4, dpi = 600)
+       .p_under, width = 6, height = 4, dpi = 600, bg = 'white')
 
 ### Overtreatment ----
 
@@ -499,7 +506,7 @@ overtreat_at_t50
 
 .p_over <- df_overtreat %>% 
   ggplot(aes(threshold, value, color = estimator)) +
-  geom_line(lwd = 2, lty = 1) +
+  geom_line(lwd = 2, aes(linetype = estimator)) +
   scale_y_continuous(labels = scales::percent,
                      limits = c(0,1)) +
   scale_x_continuous(labels = scales::percent) +
@@ -509,17 +516,24 @@ overtreat_at_t50
     y = NULL,
     color = NULL
   ) +
+  ggthemes::theme_base(base_size = 14) +
   theme(
-    legend.position = "none"
+    legend.position = "none",
+    plot.background = element_blank()
   ) +
-  scale_color_discrete(
+  scale_color_manual(
+    values = c(
+      "CS model" = "#74cbe2",
+      "CC model" = "#ff1616"
+    ),
     label = list(
       "CC model" = "Model trained on case-control data",
       "CS model" = "Model trained on cross-sectional data"
     )
-  )
+  ) +
+  guides(linetype = 'none')
 ggsave("output/manuscript/overtreatment-probaility.png", 
-       .p_over, width = 7.5, height = 4, dpi = 600)
+       .p_over, width = 6, height = 4, dpi = 600, bg = 'white')
 
 # Recalibration ----
 
