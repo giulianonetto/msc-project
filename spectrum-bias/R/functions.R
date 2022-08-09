@@ -111,7 +111,7 @@ plot_disease_prob_stacked <- function(df) {
       x = "Disease probability",
       fill = "Disease label"
     ) +
-    scale_fill_manual(values = c('0' = "skyblue", '1' = "magenta")) +
+    scale_fill_brewer(type = 'qual', palette = 2) +
     scale_x_continuous(breaks = scales::pretty_breaks(5)) 
 }
 
@@ -119,14 +119,14 @@ plot_disease_prob_nonstacked <- function(df, .geom = NULL) {
   p1 <- df %>% 
     filter(y == 0) %>% 
     ggplot(aes(x = p, fill = factor(y))) +
-    geom_histogram(fill = "skyblue", bins = 30) +
+    geom_histogram(fill = "#1B9E77", bins = 30) +
     labs(x = NULL) +
     scale_x_continuous(breaks = scales::pretty_breaks(5)) +
     coord_cartesian(xlim = c(0, 1)) 
   p2 <- df %>% 
     filter(y == 1) %>% 
     ggplot(aes(x = p, fill = factor(y))) +
-    geom_histogram(fill = "magenta", bins = 30) +
+    geom_histogram(fill = "#D95F02", bins = 30) +
     scale_x_continuous(breaks = scales::pretty_breaks(5)) +
     coord_cartesian(xlim = c(0, 1)) +
     labs(x = "Disease probability")
