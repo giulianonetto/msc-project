@@ -199,3 +199,42 @@ print_coef <- function(x) {
   names(x)[-1] <- paste0("Gene", 1:length(x[-1]))
   print(x)
 }
+
+plot_calibration <- function(.df, .pred, .title = waiver()) {
+  cal_fit <- glm(
+    y ~ x, 
+    data = .df %>% mutate(x = qlogis(!!sym(.pred))),
+    family = binomial
+  )
+  observed <- predict(cal_fit, se = TRUE)
+  .p <- .df %>% 
+    mutate(
+      obs = plogis(observed$fit),
+      obs_high = plogis(observed$fit + qnorm(.975)*observed$se.fit),
+      obs_low = plogis(observed$fit - qnorm(.975)*observed$se.fit)
+    ) %>% 
+    ggplot(aes(!! sym(.pred), obs)) +
+    geom_abline(aes(slope = 1, intercept = 0, color = "Ideal"),
+                lwd = 3, show.legend = F) +
+    geom_line(aes(color = "Logistic calibration"), lwd = 1) +
+    scale_color_manual(
+      values = c("Ideal" = "gray80", "Logistic calibration" = "black"),
+      name = NULL
+    ) +
+    coord_cartesian(ylim = c(-0.05, 1.05)) +
+    theme(legend.position = c(0.8, 0.25)) +
+    guides(color = guide_legend(override.aes = list(size = c(2.5, 1)))) +
+    labs(x = "Predicted probabilities",
+         y = "Observed proportions",
+         title = .title)
+  .p2 <- .df %>% 
+    ggplot(aes(!!sym(.pred))) +
+    geom_histogram(binwidth = 0.001, alpha = 0.5) +
+    theme_void() + theme(
+      panel.border = element_blank(),
+      panel.background = element_blank(),
+      plot.background = element_blank()
+    )
+  
+  .p + inset_element(.p2, left = 0, bottom = 0, right = 1, top = 0.2)
+}

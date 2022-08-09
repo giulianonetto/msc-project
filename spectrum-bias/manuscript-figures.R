@@ -3,10 +3,9 @@ library(tidyverse)
 library(ggpubr)
 library(patchwork)
 library(rms)
-library(rmda)
 library(pROC)
 #library(caret) # only createFolds function used
-theme_set(ggthemes::theme_base(base_size = 14))
+theme_set(theme_bw(base_size = 16))
 source("R/functions.R") 
 # create output dir for figures and stuff
 dir.create("output/manuscript", showWarnings = FALSE)
@@ -65,7 +64,8 @@ plot_disease_prob(df = df_sample_cs)
       factor(levels = c("Controls", "Cases"))
   ) %>% 
   plot_disease_prob_stacked()  +
-  labs(fill = NULL, y = "Frequency", x = "True disease probability") +
+  labs(fill = NULL, y = "Frequency", x = "True disease probability",
+       title = "Cross-sectional sample") +
   theme(legend.position = c(.8, .8))
 ggsave(
   "output/manuscript/disease-probabilities-distribution-cs-sample.png",
@@ -93,7 +93,8 @@ plot_disease_prob(df = df_sample_cc, title = .title)
       factor(levels = c("Controls", "Cases"))
   ) %>% 
   plot_disease_prob_stacked()  +
-  labs(fill = NULL, y = "Frequency", x = "True disease probability") +
+  labs(fill = NULL, y = "Frequency", x = "True disease probability",
+       title = "Case-control sample") +
   theme(legend.position = c(.8, .8))
 ggsave(
   "output/manuscript/disease-probabilities-distribution-cc-sample.png",
@@ -202,6 +203,9 @@ df_val_cc <- sample_case_control(
 
 p_hat_cs <- predict(fit_cs, newdata = df_val_cc, type = "fitted")
 p_hat_cc <- predict(fit_cc, newdata = df_val_cc, type = "fitted")
+df_val_cc$.p_hat_cs <- p_hat_cs
+df_val_cc$.p_hat_cc <- p_hat_cc
+
 (auc_cs <- get_auc(df_val_cc$y, p_hat_cs))
 (auc_cc <- get_auc(df_val_cc$y, p_hat_cc))
 
@@ -239,21 +243,26 @@ tibble(
 
 #### Calibration ----
 
-png("output/manuscript/calibration-cc-test-cc-training.png",
-    res = 300, width = 3600/2, height = 1600)
-cal_cc <- val.prob(y = df_val_cc$y, p = p_hat_cc,
-                   ylab = "Observed proportions",
-                   smooth = F, statloc = F)
-title(main = 'Model trained on case-control data')
-dev.off()
+plot_calibration(
+  .df = df_val_cc,
+  .pred = ".p_hat_cc",
+  .title = "Model trained with case-control data"
+)
+ggsave(
+  "output/manuscript/calibration-cc-test-cc-training.png",
+  width = 7, height = 4.5, dpi = 600, bg = "white"
+)
 
-png("output/manuscript/calibration-cc-test-cs-training.png",
-    res = 300, width = 3600/2, height = 1600)
-cal_cs <- val.prob(y = df_val_cc$y, p = p_hat_cs,
-                   ylab = "Observed proportions",
-                   smooth = F, statloc = F)
-title(main = 'Model trained on cross-sectional data')
-dev.off()
+plot_calibration(
+  .df = df_val_cc,
+  .pred = ".p_hat_cs",
+  .title = "Model trained with cross-sectional data"
+)
+ggsave(
+  "output/manuscript/calibration-cc-test-cs-training.png",
+  width = 7, height = 4.5, dpi = 600, bg = "white"
+)
+
 
 #### True probs ----
 
@@ -277,6 +286,9 @@ dev.off()
 
 p_hat_cs <- predict(fit_cs, newdata = df_val_cs, type = "fitted")
 p_hat_cc <- predict(fit_cc, newdata = df_val_cs, type = "fitted")
+df_val_cs$.p_hat_cs <- p_hat_cs
+df_val_cs$.p_hat_cc <- p_hat_cc
+
 (auc_cs <- get_auc(df_val_cs$y, p_hat_cs))
 (auc_cc <- get_auc(df_val_cs$y, p_hat_cc))
 
@@ -305,7 +317,6 @@ tibble(
     ),
     aes(label = .text, x = .5, y=.3), inherit.aes = F
   ) +
-  theme_bw() +
   facet_wrap(~model) +
   labs(x = "1 - Specificity",
        y = "Sensitivity",
@@ -314,21 +325,26 @@ tibble(
 #### Calibration ----
 
 
-png("output/manuscript/calibration-cs-test-cc-training.png",
-    res = 300, width = 3600/2, height = 1600)
-cal_cc <- val.prob(y = df_val_cs$y, p = p_hat_cc,
-                   ylab = "Observed proportions",
-                   smooth = F, statloc = F)
-title(main = 'Model trained on case-control data')
-dev.off()
+plot_calibration(
+  .df = df_val_cs,
+  .pred = ".p_hat_cc",
+  .title = "Model trained with case-control data"
+)
+ggsave(
+  "output/manuscript/calibration-cs-test-cc-training.png",
+  width = 7, height = 4.5, dpi = 600, bg = "white"
+)
 
-png("output/manuscript/calibration-cs-test-cs-training.png",
-    res = 300, width = 3600/2, height = 1600)
-cal_cs <- val.prob(y = df_val_cs$y, p = p_hat_cs,
-                   ylab = "Observed proportions",
-                   smooth = F, statloc = F)
-title(main = 'Model trained on cross-sectional data')
-dev.off()
+plot_calibration(
+  .df = df_val_cs,
+  .pred = ".p_hat_cs",
+  .title = "Model trained with cross-sectional data"
+)
+ggsave(
+  "output/manuscript/calibration-cs-test-cs-training.png",
+  width = 7, height = 4.5, dpi = 600, bg = "white"
+)
+
 
 #### True probs ----
 
@@ -471,7 +487,6 @@ undertreat_at_t10
     y = "Undertreatment  probability",
     color = NULL
   ) +
-  ggthemes::theme_base(base_size = 14) +
   theme(
     legend.position = c(0.6, 0.8),
     plot.background = element_blank()
@@ -516,7 +531,6 @@ overtreat_at_t50
     y = NULL,
     color = NULL
   ) +
-  ggthemes::theme_base(base_size = 14) +
   theme(
     legend.position = "none",
     plot.background = element_blank()
@@ -550,6 +564,13 @@ df_val_cs$p_cc_updated <-  predict(fit_cc_updated, newdata = df_val_cs,
 # AUC is unchanged
 pROC::auc(df_val_cs$y[-ix], df_val_cs$p_cc_updated[-ix])
 
+## Calibration after updating ----
+
+plot_calibration(
+  .df = df_val_cs,
+  .pred = "p_cc_updated",
+  .title = "Model trained on CC data and updated on CS data"
+)
 ## True probs ----
 
 png("output/manuscript/recalibration-cc-training-true-probs.png",
