@@ -37,8 +37,10 @@ get_prior_modeling_offset <- function(p_hat, sampling_ratio) {
 }
 
 sample_case_control <- function(df, n = 200,
-                                noise = NULL, cutoffs = NULL,
-                                .seed = NULL) {
+                                noise = NULL,
+                                cutoffs = NULL,
+                                .seed = NULL,
+                                prev_hat = NULL) {
 
   "
   instead of outcome risk, use predictor value for sampling probability?
@@ -80,14 +82,21 @@ sample_case_control <- function(df, n = 200,
     length(intersect(cases_ix, controls_ix)) == 0
   )
   
-  
-  return(df[c(cases_ix, controls_ix),])
+  df_sample <- df[c(cases_ix, controls_ix),]
+  if(!is.null(prev_hat)) {
+    df_sample$prev_correction_factor <- log(0.5/0.5 *(1-prev_hat)/prev_hat)
+  }
+  return(df_sample)
 }
 
-sample_cross_sectional <- function(df, n, .seed = NULL) {
+sample_cross_sectional <- function(df, n, .seed = NULL, prev_hat = NULL) {
   set.seed(.seed)
   cs_sample_ix <- sample(1:nrow(df), n)
-  return(df[cs_sample_ix, ])
+  if (!is.null(prev_hat)) {
+    df_sample <- df[cs_sample_ix, ]
+    df_sample$prev_correction_factor <- log(0.5/0.5 *(1-prev_hat)/prev_hat)
+  }
+  return(df_sample)
 }
 
 group_differences <- \(d) {

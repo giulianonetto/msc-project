@@ -250,7 +250,7 @@ plot_calibration(
 )
 ggsave(
   "output/manuscript/calibration-cc-test-cc-training.png",
-  width = 7, height = 4.5, dpi = 600, bg = "white"
+  width = 7, height = 6, dpi = 600, bg = "white"
 )
 
 plot_calibration(
@@ -260,7 +260,7 @@ plot_calibration(
 )
 ggsave(
   "output/manuscript/calibration-cc-test-cs-training.png",
-  width = 7, height = 4.5, dpi = 600, bg = "white"
+  width = 7, height = 6, dpi = 600, bg = "white"
 )
 
 
@@ -332,7 +332,7 @@ plot_calibration(
 )
 ggsave(
   "output/manuscript/calibration-cs-test-cc-training.png",
-  width = 7, height = 4.5, dpi = 600, bg = "white"
+  width = 7, height = 6, dpi = 600, bg = "white"
 )
 
 plot_calibration(
@@ -342,7 +342,7 @@ plot_calibration(
 )
 ggsave(
   "output/manuscript/calibration-cs-test-cs-training.png",
-  width = 7, height = 4.5, dpi = 600, bg = "white"
+  width = 7, height = 6, dpi = 600, bg = "white"
 )
 
 
@@ -484,11 +484,12 @@ undertreat_at_t10
   scale_x_continuous(labels = scales::percent) +
   labs(
     x = "Decision threshold", 
-    y = "Undertreatment  probability",
+    title = "Undertreatment  probability",
+    y = NULL,
     color = NULL
   ) +
   theme(
-    legend.position = c(0.6, 0.8),
+    legend.position = c(0.55, 0.8),
     plot.background = element_blank()
   ) +
   scale_color_manual(
@@ -526,7 +527,8 @@ overtreat_at_t50
                      limits = c(0,1)) +
   scale_x_continuous(labels = scales::percent) +
   labs(
-    y = "Overtreatment  probability",
+    title = "Overtreatment  probability",
+    y =NULL,
     x = "Decision threshold", 
     y = NULL,
     color = NULL
